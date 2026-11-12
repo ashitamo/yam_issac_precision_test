@@ -17,6 +17,67 @@ def tensor(value):
     return value.torch if hasattr(value, "torch") else value
 
 
+def wxyz_to_xyzw(q):
+    """Isaac Lab 2.1 native quaternion -> public dataset convention."""
+    return q[..., [1, 2, 3, 0]]
+
+
+def xyzw_to_wxyz(q):
+    """Public dataset convention -> Isaac Lab 2.1 native quaternion."""
+    return q[..., [3, 0, 1, 2]]
+
+
+def gravity_compensation(art):
+    """Use native PhysX generalized gravity forces; validate root layout."""
+    force = art.root_physx_view.get_gravity_compensation_forces()
+    root_dofs = force.shape[-1] - art.num_joints
+    if root_dofs not in (0, 6) or (art.is_fixed_base and root_dofs != 0):
+        raise RuntimeError('Unexpected native gravity force layout')
+    return force[:, root_dofs:]
+
+
+class _WxyzIKBoundary:
+    """Keep public XYZW actions independent of the backend controller format."""
+    def __init__(self, controller):
+        self.controller = controller
+
+    def reset(self, env_ids=None):
+        return self.controller.reset(env_ids)
+
+    def set_command(self, command, *args, **kwargs):
+        native = torch.cat((command[..., :3], xyzw_to_wxyz(command[..., 3:7])), dim=-1)
+        return self.controller.set_command(native, *args, **kwargs)
+
+    def compute(self, ee_pos, ee_quat, jacobian, joint_pos):
+        return self.controller.compute(ee_pos, xyzw_to_wxyz(ee_quat), jacobian, joint_pos)
+
+
+def create_simulation(device):
+    """Pinned Lab 2.1 / Sim 4.5 backend; no Isaac Sim 6 physics options."""
+    from importlib.metadata import version
+    if not version('isaacsim').startswith('4.5.') or version('isaaclab') != '2.1.0':
+        raise RuntimeError('compat/isaaclab-2.1 requires Isaac Sim 4.5.x and Isaac Lab 2.1.0; use main for Sim 6')
+    import isaaclab.sim as sim_utils
+    from pxr import PhysxSchema
+    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
+        dt=cfg.PHYSICS_DT_S, device=device, enable_scene_query_support=True,
+        physx=sim_utils.PhysxCfg(
+            min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
+            min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS)))
+    physics = PhysxSchema.PhysxSceneAPI.Get(sim_utils.get_current_stage(), sim.cfg.physics_prim_path)
+    for method, enabled in (
+        ('CreateEnableExternalForcesEveryIterationAttr', cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION),
+        ('CreateSolveArticulationContactLastAttr', cfg.SOLVE_ARTICULATION_CONTACT_LAST)):
+        create = getattr(physics, method, None)
+        if create is not None:
+            create().Set(enabled)
+        elif enabled:
+            raise RuntimeError(method + ' is unsupported in this PhysX build; do not silently change contact settings')
+    print('[BACKEND] Isaac Lab 2.1 / Sim 4.5; native WXYZ, public XYZW; '
+          'legacy solver options are configured explicitly', flush=True)
+    return sim
+
+
 class ParallelYamScene:
     """Fixed workpiece per environment; reset selected robot/peg states only.
 
@@ -143,18 +204,18 @@ class ParallelYamScene:
         q = tensor(art.data.default_joint_pos)[ids].clone()
         zero = torch.zeros_like(q)
         art.reset(env_ids=ids)
-        art.write_joint_state_to_sim_index(position=q, velocity=zero, env_ids=ids)
-        art.set_joint_position_target_index(target=q, env_ids=ids)
-        art.set_joint_velocity_target_index(target=zero, env_ids=ids)
-        art.set_joint_effort_target_index(target=zero, env_ids=ids)
+        art.write_joint_state_to_sim(position=q, velocity=zero, env_ids=ids)
+        art.set_joint_position_target(target=q, env_ids=ids)
+        art.set_joint_velocity_target(target=zero, env_ids=ids)
+        art.set_joint_effort_target(target=zero, env_ids=ids)
         limits = torch.full_like(q, self.robot.config.gripper_effort_limit_sim)
         limits[:, self.robot.arm_joint_indices] = self.robot.config.arm_effort_limit_sim
-        art.write_joint_effort_limit_to_sim_index(limits=limits, env_ids=ids)
+        art.write_joint_effort_limit_to_sim(limits=limits, env_ids=ids)
         state = tensor(self.peg.data.default_root_state)[ids].clone()
         state[:, :3] += self.scene.env_origins[ids]
         self.peg.reset(env_ids=ids)
-        self.peg.write_root_pose_to_sim_index(root_pose=state[:, :7], env_ids=ids)
-        self.peg.write_root_velocity_to_sim_index(root_velocity=state[:, 7:], env_ids=ids)
+        self.peg.write_root_pose_to_sim(root_pose=state[:, :7], env_ids=ids)
+        self.peg.write_root_velocity_to_sim(root_velocity=state[:, 7:], env_ids=ids)
         self.episode_count[ids] += 1
 
     def step(self, render=False, profiler=None):
@@ -255,8 +316,8 @@ class YamPickInsertEnv:
         finger = (-.5 * (actions[:, 6] + self.robot.config.gripper_contact_overlap_m)).clamp(
             self.robot.config.gripper_joint_open_m, self.robot.config.gripper_joint_closed_m)
         q[:, self.robot.gripper_joint_indices] = finger[:, None]
-        art.set_joint_position_target_index(target=q)
-        ff = tensor(art.data.gravity_compensation_forces)[:, art.num_base_dofs:].clone()
+        art.set_joint_position_target(target=q)
+        ff = gravity_compensation(art).clone()
         if not cfg.GRAVITY_COMPENSATION_ENABLED:
             ff.zero_()
         ff[:, self.robot.gripper_joint_indices] = 0.
@@ -271,7 +332,7 @@ class YamPickInsertEnv:
         # conversion is intentionally explicit; vectorization is a later change.
         origins = self.scene.scene.env_origins
         peg_pose = torch.cat([tensor(peg.data.root_pos_w) - origins,
-            tensor(peg.data.root_quat_w)], dim=1)
+            wxyz_to_xyzw(tensor(peg.data.root_quat_w))], dim=1)
         if not self.legacy_pose_reads and hasattr(self.robot, 'get_ee_poses_base'):
             ee = self.robot.get_ee_poses_base().detach().clone()
         else:
@@ -442,6 +503,7 @@ class CartesianYamEnv:
             controller = DifferentialIKController(DifferentialIKControllerCfg(command_type='pose',
                 use_relative_mode=False, ik_method='dls', ik_params={'lambda_val': cfg.CARTESIAN_IK_DAMPING}),
                 self.num_envs, self.device)
+            controller = _WxyzIKBoundary(controller)
         self.controller = controller
         self.jacobian_provider = jacobian_provider or self.env.robot.get_ee_jacobian_base
         self.last_joint_target = None

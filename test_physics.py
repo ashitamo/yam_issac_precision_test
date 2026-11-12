@@ -87,7 +87,7 @@ def run_case(path):
     # This is a physics validation run, not an RGB collection run.
     cfg.RENDER_EVERY_N_STEPS = 100000
     cfg.CAMERA_PERIOD_S = 100000.0
-    sys.argv = ['run_environment.py', '--viz', 'none', '--expert',
+    sys.argv = ['run_environment.py', '--headless', '--expert',
                 '--clearance_mm', str(case['clearance_mm']),
                 '--output_dir', str(Path(path).parent), '--max_steps', str(profile['hz'] * 180)]
     if 'hole_position_m' not in case:

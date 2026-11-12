@@ -49,17 +49,12 @@ def main():
     profiler = None
     try:
         import isaaclab.sim as sim_utils
-        from isaaclab_physx.physics import PhysxCfg
+        from env_yam import create_simulation
         import env_config as cfg
         from env_task import contact_gate_pass, geometry_diagnostic_thresholds
         from env_yam import ParallelYamScene
         from env_expert import ParallelExpert
-        sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
-            dt=cfg.PHYSICS_DT_S, device=args.device, enable_scene_query_support=True,
-            physics=PhysxCfg(min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
-                min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS,
-                enable_external_forces_every_iteration=cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION,
-                solve_articulation_contact_last=cfg.SOLVE_ARTICULATION_CONTACT_LAST)))
+        sim = create_simulation(args.device)
         light = sim_utils.DomeLightCfg(intensity=cfg.LIGHT_INTENSITY)
         light.func("/World/Light", light)
         sim.set_camera_view((4., 4., 3.), (0., 0., 0.))
@@ -80,7 +75,7 @@ def main():
         if args.profile:
             from env_profiling import RolloutProfiler
             profiler = RolloutProfiler()
-        with (profiler.rollout() if profiler else nullcontext()), (profiler.engine_calls(sim.physics_manager) if profiler else nullcontext()):
+        with (profiler.rollout() if profiler else nullcontext()), (profiler.engine_calls(sim) if profiler else nullcontext()):
             while launcher.app.is_running() and steps < max_steps and not expert.finished:
                 if steps % control_every == 0:
                     with profiler.section('command') if profiler else nullcontext():

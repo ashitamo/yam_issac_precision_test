@@ -30,18 +30,13 @@ def main():
         import numpy as np
         import torch
         import isaaclab.sim as sim_utils
-        from isaaclab_physx.physics import PhysxCfg
+        from env_yam import create_simulation
         from env_yam import ParallelYamScene, tensor
         from env_yam import YamPickInsertEnv
         from env_yam import CartesianYamEnv, compose_target, encode_reference
         from env_workspace_grid import get_grid_point
         from scipy.spatial.transform import Rotation
-        sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=cfg.PHYSICS_DT_S, device=args.device,
-            enable_scene_query_support=True, physics=PhysxCfg(
-                min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
-                min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS,
-                enable_external_forces_every_iteration=cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION,
-                solve_articulation_contact_last=cfg.SOLVE_ARTICULATION_CONTACT_LAST)))
+        sim = create_simulation(args.device)
         grids = ['r08_c08', 'r16_c16'] if args.expert else ['r08_c08']
         scene = ParallelYamScene(sim, len(grids), .5, [get_grid_point(grid)['hole_position_m'] for grid in grids])
         sim.reset()
@@ -63,7 +58,7 @@ def main():
             for sign in (1, -1):
                 q = original[:1].clone()
                 q[0, joint] += sign * epsilon
-                art.write_joint_state_to_sim_index(position=q, velocity=q * 0., env_ids=ids)
+                art.write_joint_state_to_sim(position=q, velocity=q * 0., env_ids=ids)
                 sim.forward()
                 poses.append(scene.robot.get_ee_pose_base(0))
             finite.append(np.r_[(poses[0][0] - poses[1][0]) / (2 * epsilon),

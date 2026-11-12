@@ -25,17 +25,12 @@ def main():
     try:
         import torch
         import isaaclab.sim as sim_utils
-        from isaaclab_physx.physics import PhysxCfg
+        from env_yam import create_simulation
         from env_yam import ParallelYamScene
         from env_yam import YamPickInsertEnv
         from env_task import geometry_diagnostic_thresholds
         from env_workspace_grid import get_grid_point
-        sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=cfg.PHYSICS_DT_S,
-            device=args.device, enable_scene_query_support=True,
-            physics=PhysxCfg(min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
-                min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS,
-                enable_external_forces_every_iteration=cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION,
-                solve_articulation_contact_last=cfg.SOLVE_ARTICULATION_CONTACT_LAST)))
+        sim = create_simulation(args.device)
         positions = [get_grid_point(grid)['hole_position_m'] for grid in ('r08_c08', 'r16_c16')]
         scene = ParallelYamScene(sim, 2, .5, positions)
         sim.reset()

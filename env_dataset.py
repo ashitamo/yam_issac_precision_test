@@ -49,7 +49,7 @@ class WristCamera:
             # earlier than the next period; it must still get a fresh image.
             width=cfg.CAMERA_WIDTH, height=cfg.CAMERA_HEIGHT, update_period=0.,
             data_types=['rgb', 'distance_to_image_plane'],
-            offset=CameraCfg.OffsetCfg(pos=(0., 0., 0.), rot=(0., 0., 0., 1.), convention='ros'),
+            offset=CameraCfg.OffsetCfg(pos=(0., 0., 0.), rot=(1., 0., 0., 0.), convention='ros'),
             spawn=sim_utils.PinholeCameraCfg(focal_length=cfg.CAMERA_FOCAL_LENGTH_MM,
                 horizontal_aperture=cfg.CAMERA_HORIZONTAL_APERTURE_MM,
                 vertical_aperture=cfg.CAMERA_VERTICAL_APERTURE_MM,

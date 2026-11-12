@@ -10,6 +10,7 @@ from scipy.spatial.transform import Rotation
 
 import env_config as cfg
 from env_task import peg_geometry, release_ready, contact_gate_pass, geometry_diagnostic_thresholds
+from env_yam import wxyz_to_xyzw, gravity_compensation
 
 
 def load_environment_class():
@@ -17,6 +18,7 @@ def load_environment_class():
     node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == 'YamPickInsertEnv')
     namespace = dict(np=np, torch=torch, Rotation=Rotation, cfg=cfg,
         tensor=lambda value: value.torch if hasattr(value, 'torch') else value,
+        wxyz_to_xyzw=wxyz_to_xyzw, gravity_compensation=gravity_compensation,
         peg_geometry=peg_geometry, release_ready=release_ready,
         contact_gate_pass=contact_gate_pass, geometry_diagnostic_thresholds=geometry_diagnostic_thresholds)
     exec(compile(ast.Module(body=[node], type_ignores=[]), '<environment contract>', 'exec'), namespace)
@@ -35,8 +37,9 @@ class FakeScene:
             joint_pos_target=torch.zeros(2, 8), joint_pos_limits=torch.tensor([[[-3., 3.]] * 8] * 2),
             gravity_compensation_forces=torch.zeros(2, 8), applied_torque=torch.zeros(2, 8),
             computed_torque=torch.zeros(2, 8))
-        art = SimpleNamespace(data=data, num_base_dofs=0)
-        art.set_joint_position_target_index = lambda target: setattr(data, 'joint_pos_target', target.clone())
+        art = SimpleNamespace(data=data, num_joints=8, is_fixed_base=True,
+            root_physx_view=SimpleNamespace(get_gravity_compensation_forces=lambda: torch.zeros(2, 8)))
+        art.set_joint_position_target = lambda target: setattr(data, 'joint_pos_target', target.clone())
         self.robot = SimpleNamespace(articulation=art, arm_joint_indices=list(range(6)), gripper_joint_indices=[6, 7],
             max_gripper_opening_m=.093961,
             config=SimpleNamespace(gripper_contact_overlap_m=.001039,
@@ -44,7 +47,7 @@ class FakeScene:
             get_ee_pose_base=lambda index: (np.array([.265, .065, .139]), Rotation.identity()),
             set_feedforward_effort_target=lambda value: None)
         self.peg = SimpleNamespace(data=SimpleNamespace(root_pos_w=torch.zeros(2, 3),
-            root_quat_w=torch.tensor([[0., 0., 0., 1.]] * 2), root_lin_vel_w=torch.zeros(2, 3)))
+            root_quat_w=torch.tensor([[1., 0., 0., 0.]] * 2), root_lin_vel_w=torch.zeros(2, 3)))
         self.calls = 0
 
     def reset(self, ids):

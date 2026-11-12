@@ -14,17 +14,17 @@ class ReleaseFixture(env_expert.GraspValidation):
         self.commanded_q = self.solve_ik(self.fixture_target)
         self.target_q = self.commanded_q.copy()
         self.stages = [("release", self.fixture_target, cfg.GRASP_OPENING_M)]
-        q = robot.articulation.data.joint_pos.torch.clone()
+        q = robot.articulation.data.joint_pos.clone()
         q[0, :6] = q.new_tensor(self.commanded_q)
         q[0, robot.gripper_joint_indices] = -0.00502
-        robot.articulation.write_joint_state_to_sim_index(position=q, velocity=q * 0.0)
+        robot.articulation.write_joint_state_to_sim(position=q, velocity=q * 0.0)
 
     def observe(self, dt):
         self.stage_time += dt
         if int(self.stage_time / dt) % 120 == 0:
             data = self.robot.articulation.data
             print("[FIXTURE]", self.stage_time,
-                  "q", data.joint_pos.torch[0].tolist(),
+                  "q", data.joint_pos[0].tolist(),
                   "gap", self.robot.get_gripper_opening(), flush=True)
         if self.stage_time >= 3.0:
             self.finished = True
@@ -52,7 +52,7 @@ def main():
     ReleaseFixture.with_peg = args.with_peg
     original_expert = env_expert.GraspValidation
     env_expert.GraspValidation = ReleaseFixture
-    sys.argv = ['run_environment.py', '--viz', 'none', '--expert', '--max_steps', '1000']
+    sys.argv = ['run_environment.py', '--headless', '--expert', '--max_steps', '1000']
     import run_environment
     try:
         run_environment.main()

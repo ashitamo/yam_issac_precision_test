@@ -4,7 +4,63 @@
 **這是文件交接，不代表 Ubuntu 安裝／雙卡驗證已完成。收集目前按要求停止。**
 日常指令保留在 [README](README.md)；本文件說明版本、設計、資料與風險。
 
-## 1. 專案現況與範圍
+
+## 0. Isaac Lab 2.1 相容分支（本分支優先資訊）
+
+- Branch：`compat/isaaclab-2.1`；main 原版起點 `d23468318ef8c2f5cd17e460b666eb45be0c1a96` 未修改。
+- 目標：Ubuntu 22.04.5、550.144.03、RTX 4090；**不保證這個 driver 組合已驗證**，不更動驅動。
+- 固定版本：Python 3.10、Isaac Sim 4.5.0、Isaac Lab **v2.1.0**，官方 tag commit
+  `21f7136325136ca3f6ca4e0a8125edffe5c24f7e`；Torch 2.5.1/cu121。
+- 安裝指令見 README。不要在現有 Python 3.12 環境覆蓋安裝，不用容器繞過 host driver 限制。
+- 本機僅有 Sim 6 runtime；60 個 CPU 測試通過，不等於舊版原生模擬通過。
+- 後文原有 104 回合資料、效能數字、0.10 mm 接觸驗證均是 **main 歷史證據**，未移植認證。
+- 不自動恢復收集、不修改既有 data/checkpoint。相容版必須用全新 data_dir。
+
+### 實作差異與 review 重點
+
+1. `env_yam.create_simulation` 集中建構舊版 `SimulationCfg(physx=PhysxCfg(...))`，
+   並拒絕錯誤 Sim/Lab runtime；不再依賴 isaaclab_physx。
+2. Articulation / RigidObject 使用 v2.1 原生 Torch tensor 與不帶 `_index` 的寫入 API。
+3. 對外 observation、SciPy、action target、HDF5 繼續 XYZW；只有原生物理、
+   spawn（含指尖接觸面）、CameraCfg 與 DifferentialIK 邊界轉 WXYZ。
+   身體 pose 來自原生 FK，不新增另一套 runtime URDF FK。
+4. Jacobian 使用 `root_physx_view.get_jacobians()`，檢查 fixed/floating 欄位，
+   從 COM 平移到 TCP，再轉 BASE；以原生 FK 有限差分測試作為上機門檻。
+5. 重力補償使用 `get_gravity_compensation_forces()` 並檢查 0／6 個 root 欄位。
+   保留 10 Nm 總力矩預算、夾爪 actuator、質量與摩擦設定；未宣稱動態等效。
+6. 這次實驗未用到的 Sim 6 cuMotion／experimental RMPflow 類別從本分支移除，
+   不提供同名假相容函式；CartesianYamEnv 繼續使用 Lab 原生 DLS IK。
+7. 舊版無法沿用新版兩個求解器開關。分支明確設定
+   `TGS_EXTERNAL_FORCES_EVERY_ITERATION=False`、`SOLVE_ARTICULATION_CONTACT_LAST=False`。
+   若將不支援的選項設 True，建構時報錯，不靜默略過。所有公差需重新驗證。
+8. profiler 改量 `engine.step_inclusive`，不再聲稱可分開量 simulate/fetch_results。
+   相機保持每環境 RGB-D、30 Hz 記錄契約；需在 4.5 實測畫面與 row mapping。
+9. GUI 不加 `--headless` 即可；2.1 不使用 `--viz kit`。
+
+### Ubuntu 上必須依序通過的 gate
+
+從專案根目錄、啟用 env_yam21 執行；報告與資料一律新目錄。
+
+```bash
+python -m pip check
+python -B -m unittest discover -s unit_test -p 'unittest_*.py' -q
+python -B test_assets.py
+python -u test_parallel_environments.py --headless --device cuda:0 --num_envs 2 --steps 24 --output_dir outputs/lab21_reset_001
+python -u run_environment.py --device cuda:0 --max_steps 120 --camera_snapshot outputs/lab21_camera_001.png
+python -u test_cartesian_adapter.py --headless --device cuda:0 --expert --output_dir outputs/lab21_cartesian_001
+python -u record_expert_data.py --headless --device cuda:0 --num_envs 1 --grid_ids r08_c08 --clearance_mm 0.5 --data_dir data/lab21_smoke_001 --replay
+```
+
+確認 reports 成功、Jacobian probe 通過、相機非黑圖且時間戳遞增、實際落底／開爪及回播成立；
+再測四環境與 0.10 mm 少量點（`test_precision_subset.py`），最後才跑正式全網格。
+兩張 GPU 仍非自動分片；GPU 1 要獨立程序、獨立 data_dir。
+若 import、資產 reference、shader、driver 或 native probe 失敗，停在該 gate 留下 log；
+不能把 CPU tests 通過當成完整移植成功。
+
+參考：[官方 v2.1.0 安裝](https://isaac-sim.github.io/IsaacLab/v2.1.0/source/setup/installation/pip_installation.html)；
+[官方 v2.1.0 原始碼](https://github.com/isaac-sim/IsaacLab/tree/v2.1.0)。
+
+## 1. 專案現況與範圍（main 歷史基線）
 
 YAM 從桌上實際夾取白色 peg，lift、transfer、align、insert、release，
 以原生物理狀態判斷落底，不把 peg 固定在末端。
@@ -42,23 +98,7 @@ c2e46a0139fc81b016d2eb8bf1d8d6b4c5a1587d
 不要把整個 dirty checkout 當成乾淨 release。接手者應核對 core library diff。
 以 commit 與實際 API 為準，不要猜目前 package 版本等於官網同名 release tag。
 
-Ubuntu 重建順序：
-
-1. 裝相容 NVIDIA driver，nvidia-smi 確認兩張卡可見；先跑官方 Compatibility Checker。
-2. 建立 Python 3.12 環境，在 Linux 安裝相符的 Isaac Sim 與對應 Isaac Lab source。
-3. 確認 PhysX backend、Torch／CUDA／Warp、h5py、SciPy、trimesh 可用；
-   正式收集前記錄 Linux 實際 versions、driver 與 git commit。
-4. 核對 robot_yam.py 頂端啟用的兩個 extension：
-   isaacsim.robot_motion.experimental.motion_generation、isaacsim.robot_motion.cumotion。
-   目前即使用 DIK，robot wrapper 仍會匯入它們；extension 缺失不能當作可忽略 warning。
-5. 不要複製 Windows conda／site-packages，不要直接 pip freeze 原機所有套件安裝到 Linux；
-   路徑、二進位 wheel、平台套件與 editable 安裝需要重建。
-
-官方參考：
-[Isaac Sim 6.0 requirements](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/requirements.html)、
-[Python environment installation](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/install_python.html)。
-官方列 Ubuntu 22.04/24.04；安裝文件示例 wheel 版本可能與本機 distribution 字串不同，
-必須確認取得的 Linux build，不要把示例版本視為已驗證替代品。
+此節僅記錄 main 的原機版本；本分支 Ubuntu 安裝請依第 0 節與 README，不安裝 Sim 6。
 
 ## 3. 要搬哪些資料
 
@@ -69,7 +109,7 @@ Ubuntu 重建順序：
 本專案資產路徑依 Path(__file__) 定位；Linux 檔名大小寫須一致，
 USD 的外部 reference 是否完整，仍需新機資產測試確認。
 
-本次不自動修改依賴、程式、舊 checkpoint 或搬動已收資料。
+相容分支已修改程式 API；不修改舊 checkpoint 或搬動已收資料。
 
 ## 4. 建議接手驗證順序
 
@@ -129,7 +169,7 @@ NVMe 吞吐。不要宣稱此配置已完成雙卡全網格收集。
 | env_dataset.py | 批次相機列對應、時間同步、分塊 HDF5 與 episode 驗證 |
 | env_workspace_grid.py | 17×17 grid 與既有離線 FK／IK 篩查 |
 | record_expert_data.py | 固定孔位 worker、audit／可選 replay，以及 --all_grid supervisor |
-| env_profiling.py | 可選原生 simulate／fetch 計時，不改已安裝 Isaac Lab |
+| env_profiling.py | 可選整體 step 計時，不改已安裝 Isaac Lab，不提供分開的 simulate／fetch 計時 |
 
 run_environment 使用同一套場景，但是 joint-space viewer；不錄製 HDF5。
 collector 使用 Cartesian adapter；不要把兩種 action 混用。

@@ -39,13 +39,8 @@ from env_dataset import WristCamera
 
 def main():
     """Viewer and legacy validation CLI, backed by the shared environment."""
-    from isaaclab_physx.physics import PhysxCfg
-    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
-        dt=cfg.PHYSICS_DT_S, device=args.device,
-        physics=PhysxCfg(min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
-            min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS,
-            enable_external_forces_every_iteration=cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION,
-            solve_articulation_contact_last=cfg.SOLVE_ARTICULATION_CONTACT_LAST)))
+    from env_yam import create_simulation
+    sim = create_simulation(args.device)
     sim.set_camera_view(cfg.OVERVIEW_EYE_M, cfg.OVERVIEW_TARGET_M)
     light = sim_utils.DomeLightCfg(intensity=cfg.LIGHT_INTENSITY)
     light.func("/World/Light", light)

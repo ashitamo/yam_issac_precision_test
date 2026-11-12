@@ -91,17 +91,15 @@ class EnvironmentValidationTests(unittest.TestCase):
 
     def test_engine_profiler_restores_interface_on_exception(self):
         from env_profiling import RolloutProfiler
-        interface = SimpleNamespace(simulate=lambda *a: None, fetch_results=lambda: None)
-        manager = SimpleNamespace(_physx_sim=interface)
+        step = lambda *a: None
+        manager = SimpleNamespace(step=step)
         profiler = RolloutProfiler()
         with self.assertRaises(ValueError):
             with profiler.engine_calls(manager):
-                manager._physx_sim.simulate(.01, 0.)
-                manager._physx_sim.fetch_results()
+                manager.step(False)
                 raise ValueError('test')
-        self.assertIs(manager._physx_sim, interface)
-        self.assertEqual(profiler.sections['engine.simulate']['count'], 1)
-        self.assertEqual(profiler.sections['engine.fetch_results']['count'], 1)
+        self.assertIs(manager.step, step)
+        self.assertEqual(profiler.sections['engine.step_inclusive']['count'], 1)
 
     def test_rollout_profiler_records_sections_and_saves_on_exception(self):
         from env_profiling import RolloutProfiler
@@ -210,8 +208,8 @@ class EnvironmentValidationTests(unittest.TestCase):
         expert.commanded_q = np.zeros(6)
         expert.solve_ik = lambda *a, **kw: np.zeros(6)
         articulation = SimpleNamespace(
-            data=SimpleNamespace(gravity_compensation_forces=SimpleNamespace(torch=torch.zeros(1, 8))),
-            num_base_dofs=0, set_joint_effort_target=lambda value: None)
+            root_physx_view=SimpleNamespace(get_gravity_compensation_forces=lambda: torch.zeros(1, 8)),
+            num_joints=8, is_fixed_base=True, set_joint_effort_target=lambda value: None)
         expert.robot = SimpleNamespace(
             articulation=articulation, gripper_joint_indices=[6, 7],
             get_ee_pose_base=lambda: (expert.stages[0][1] + [.0001, 0., 0.], Rotation.identity()),

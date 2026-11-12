@@ -72,7 +72,7 @@ def main():
     parser.add_argument('--solver_profile', choices=['baseline', 'low_iter_candidate'], default='baseline')
     parser.add_argument('--replay', action='store_true', help='Extra saved-action replay for validation; not required for every collection.')
     parser.add_argument('--reference_reads', action='store_true', help='Use legacy per-row pose/CPU reads for paired performance comparison.')
-    parser.add_argument('--profile', action='store_true', help='Also time native simulate/fetch_results calls; no added CUDA synchronization.')
+    parser.add_argument('--profile', action='store_true', help='Time inclusive SimulationContext.step calls; no separate simulate/fetch attribution.')
     parser.add_argument('--max_wall_seconds', type=float, default=3600.)
     parser.add_argument('--compression', choices=['gzip', 'lzf'], default='lzf')
     AppLauncher.add_app_launcher_args(parser)
@@ -118,16 +118,11 @@ def main():
         np.random.seed(0)
         torch.manual_seed(0)
         import isaaclab.sim as sim_utils
-        from isaaclab_physx.physics import PhysxCfg
+        from env_yam import create_simulation
         from env_yam import ParallelYamScene, YamPickInsertEnv, CartesianYamEnv
         from env_expert import ParallelExpert
         from env_dataset import WristCameraBatch, EpisodeRecorder
-        sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=cfg.PHYSICS_DT_S,
-            device=args.device, enable_scene_query_support=True, physics=PhysxCfg(
-                min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
-                min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS,
-                enable_external_forces_every_iteration=cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION,
-                solve_articulation_contact_last=cfg.SOLVE_ARTICULATION_CONTACT_LAST)))
+        sim = create_simulation(args.device)
         sim.set_camera_view(cfg.OVERVIEW_EYE_M, cfg.OVERVIEW_TARGET_M)
         light = sim_utils.DomeLightCfg(intensity=cfg.LIGHT_INTENSITY)
         light.func('/World/Light', light)
@@ -139,7 +134,7 @@ def main():
         from env_profiling import RolloutProfiler
         profiler = RolloutProfiler()
         if args.profile:
-            stack.enter_context(profiler.engine_calls(sim.physics_manager))
+            stack.enter_context(profiler.engine_calls(sim))
         checks = scene.validate_workpiece_colliders()
         if not all(check['passed'] for check in checks):
             raise RuntimeError('Workpiece collider verification failed')
@@ -174,6 +169,7 @@ def main():
             'env_task.py', 'env_dataset.py', 'env_workspace_grid.py', 'env_profiling.py', 'record_expert_data.py']
         hashes = {name: hashlib.sha256((cfg.PROJECT_ROOT / name).read_bytes()).hexdigest() for name in sources}
         metadata = dict(split='unassigned', seed=0, action_schema=env.ACTION_SCHEMA,
+            backend='isaaclab-2.1.0_physx_sim-4.5', public_quaternion_order='xyzw', native_quaternion_order='wxyz',
             device=str(sim.device), solver_profile=args.solver_profile,
             robot_config=jsonable(vars(scene.robot.config)),
             physics_dt_s=low.physics_dt, servo_period_s=low.control_period, policy_period_s=env.period,

@@ -146,7 +146,7 @@ class GraspValidation:
             value = self.observation["privileged"]["peg_pose_base"][self.env_id, 3:]
         else:
             raw = self.peg.data.root_quat_w
-            value = (raw.torch if hasattr(raw, "torch") else raw)[self.env_id]
+            value = (raw.torch if hasattr(raw, "torch") else raw)[self.env_id][[1, 2, 3, 0]]
         return Rotation.from_quat(value.detach().cpu().numpy()).apply([0., 0., 1.])
 
     def _peg_speed(self):
@@ -250,9 +250,8 @@ class GraspValidation:
             return
         self.robot.set_joint_position_target(command)
         articulation = self.robot.articulation
-        compensation = articulation.data.gravity_compensation_forces.torch[
-            :, articulation.num_base_dofs:
-        ].clone()
+        from env_yam import gravity_compensation
+        compensation = gravity_compensation(articulation).clone()
         if not cfg.GRAVITY_COMPENSATION_ENABLED:
             compensation.zero_()
         compensation[:, self.robot.gripper_joint_indices] = 0.0
@@ -651,8 +650,9 @@ class ParallelExpert:
             opening = (-2 * self.target[:, self.scene.robot.gripper_joint_indices].mean(dim=1)
                 - self.scene.robot.config.gripper_contact_overlap_m).clamp(0., self.scene.robot.max_gripper_opening_m)
             return torch.cat([self.target[:, self.scene.robot.arm_joint_indices], opening[:, None]], dim=1)
-        art.set_joint_position_target_index(target=self.target)
-        compensation = tensor(art.data.gravity_compensation_forces)[:, art.num_base_dofs:].clone()
+        art.set_joint_position_target(target=self.target)
+        from env_yam import gravity_compensation
+        compensation = gravity_compensation(art).clone()
         if not cfg.GRAVITY_COMPENSATION_ENABLED:
             compensation.zero_()
         compensation[:, self.scene.robot.gripper_joint_indices] = 0.0

@@ -3,10 +3,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Reusable YAM robot wrapper for joint-space and cuMotion RMPflow control.
+"""Reusable YAM robot wrapper for Isaac Lab 2.1 joint-space and Cartesian control.
 
 Import this module only after :class:`isaaclab.app.AppLauncher` has created the
-Isaac Sim application. The wrapper enables its motion-generation extensions.
+Isaac Sim application. Cartesian control is owned by env_yam using the native DifferentialIKController.
 """
 
 from __future__ import annotations
@@ -16,26 +16,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-import omni.kit.app
 import torch
-import warp as wp
 from scipy.spatial.transform import Rotation
 from scipy.spatial import ConvexHull
 
-# Keep the wrapper self-contained: callers only need to create AppLauncher
-# before importing this module.
-_extension_manager = omni.kit.app.get_app().get_extension_manager()
-_extension_manager.set_extension_enabled_immediate(
-    "isaacsim.robot_motion.experimental.motion_generation",
-    True,
-)
-_extension_manager.set_extension_enabled_immediate(
-    "isaacsim.robot_motion.cumotion",
-    True,
-)
-
-import isaacsim.robot_motion.cumotion as cm
-import isaacsim.robot_motion.experimental.motion_generation as mg
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import Articulation, ArticulationCfg
@@ -100,51 +84,11 @@ class YamRobotConfig:
     tool_frame: str = "gripper"
 
 
-class StaticWorldRmpFlowController(cm.RmpFlowController):
-    """RMPflow controller for a static scene without registered obstacles."""
-
-    def forward(
-        self,
-        estimated_state: mg.RobotState,
-        setpoint_state: mg.RobotState | None,
-        t: float,
-        **kwargs,
-    ) -> mg.RobotState | None:
-        del estimated_state, kwargs
-        if self._rmp_flow is None:
-            return None
-
-        if setpoint_state is not None:
-            joint_attractor = self._joint_position_from_robot_state(setpoint_state)
-            if joint_attractor is not None:
-                self._rmp_flow.set_cspace_attractor(joint_attractor)
-            tool_position = self._tool_position_from_robot_state(setpoint_state)
-            if tool_position is not None:
-                self._rmp_flow.set_end_effector_position_attractor(tool_position)
-            tool_orientation = self._tool_orientation_from_robot_state(setpoint_state)
-            if tool_orientation is not None:
-                self._rmp_flow.set_end_effector_orientation_attractor(tool_orientation)
-
-        frame_duration = t - self._previous_run_time
-        self._output_position, self._output_velocity = self._euler_integration(
-            self._output_position,
-            self._output_velocity,
-            frame_duration,
-        )
-        self._previous_run_time = t
-        self._output_joint_state._update_data_in_place(
-            positions_np=self._output_position,
-            velocities_np=self._output_velocity,
-        )
-        return self._cached_output_robot_state
-
-
 class YamRobot:
     """Spawn and control one YAM articulation.
 
     The caller owns the simulation lifecycle. Construct the object before
-    ``sim.reset()``, then call :meth:`initialize_rmpflow` after the first reset
-    and physics step when EE control is required.
+    ``sim.reset()``. CartesianYamEnv supplies EE control after reset.
     """
 
     ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
@@ -169,7 +113,7 @@ class YamRobot:
         ids = self.arm_joint_indices
         bounded, drive_limits = self._arm_effort_budget(target[:, ids], self.config.arm_effort_limit_sim)
         target[:, ids] = bounded
-        self.articulation.write_joint_effort_limit_to_sim_index(limits=drive_limits, joint_ids=ids)
+        self.articulation.write_joint_effort_limit_to_sim(limits=drive_limits, joint_ids=ids)
         self.articulation.set_joint_effort_target(target)
         self.arm_feedforward_effort = bounded.clone()
         self.arm_drive_effort_limits = drive_limits.clone()
@@ -224,11 +168,6 @@ class YamRobot:
         if spawn:
             self._spawn_usd()
         self.articulation = Articulation(self._make_articulation_cfg())
-        self.cumotion_robot = None
-        self.world_interface = None
-        self.rmpflow_controller: StaticWorldRmpFlowController | None = None
-        self.robot_joint_space: list[str] = []
-        self.robot_site_space: list[str] = []
 
     @property
     def articulation_root_path(self) -> str:
@@ -247,7 +186,7 @@ class YamRobot:
             self.config.prim_path,
             usd_cfg,
             translation=self.config.translation,
-            orientation=self.config.orientation_xyzw,
+            orientation=tuple(self.config.orientation_xyzw[i] for i in (3, 0, 1, 2)),
         )
         self._configure_finger_colliders()
         self._configure_visual_materials()
@@ -377,7 +316,7 @@ class YamRobot:
             )
             pad.func(f"{gripper_path}/{tip_name}/PlanarContactFace", pad,
                      translation=tuple(rotation.inv().apply(center - origin)),
-                     orientation=tuple(rotation.inv().as_quat()))
+                     orientation=tuple(rotation.inv().as_quat()[[3, 0, 1, 2]]))
             print(
                 f"[YAM COLLISION] {tip_name}: verified approximation={approximation}; "
                 f"planar contact faces; "
@@ -436,96 +375,6 @@ class YamRobot:
         """Return the articulation body index for ``name``."""
         return self.articulation.body_names.index(name)
 
-    @staticmethod
-    def _torch_to_wp_float32(tensor: torch.Tensor) -> wp.array:
-        tensor = tensor.detach().to(device="cpu", dtype=torch.float32).contiguous()
-        return wp.from_torch(tensor, dtype=wp.float32)
-
-    @staticmethod
-    def _rotation_to_wxyz(rotation: Rotation) -> np.ndarray:
-        return rotation.as_quat(scalar_first=True).astype(np.float32)
-
-    def initialize_rmpflow(self) -> StaticWorldRmpFlowController:
-        """Load cuMotion resources and create a controller for BASE-frame EE targets."""
-        if not self.config.cumotion_dir.is_dir():
-            raise FileNotFoundError(self.config.cumotion_dir)
-
-        self.cumotion_robot = cm.load_cumotion_robot(
-            directory=self.config.cumotion_dir,
-            urdf_filename=self.config.urdf_filename,
-            xrdf_filename=self.config.xrdf_filename,
-        )
-        self.robot_joint_space = list(self.cumotion_robot.controlled_joint_names)
-        self.robot_site_space = list(
-            self.cumotion_robot.robot_description.tool_frame_names()
-        )
-        if self.config.tool_frame not in self.robot_site_space:
-            raise RuntimeError(
-                f"Tool frame {self.config.tool_frame!r} is not in {self.robot_site_space}."
-            )
-        if self.config.tool_frame not in self.articulation.body_names:
-            raise RuntimeError(
-                f"Tool frame {self.config.tool_frame!r} is not an articulation body."
-            )
-
-        self.world_interface = cm.CumotionWorldInterface(
-            visualize_debug_prims=False,
-            device="cpu",
-        )
-        base_position_wp = self._torch_to_wp_float32(
-            self.articulation.data.root_pos_w.torch
-        )
-        base_rotation = Rotation.from_quat(
-            self.articulation.data.root_quat_w.torch[0]
-            .detach()
-            .cpu()
-            .numpy()
-            .astype(np.float64)
-        )
-        base_orientation_wp = wp.array(
-            [self._rotation_to_wxyz(base_rotation).tolist()],
-            dtype=wp.float32,
-            device="cpu",
-        )
-        self.world_interface.update_world_to_robot_root_transforms(
-            (base_position_wp, base_orientation_wp)
-        )
-        self.rmpflow_controller = StaticWorldRmpFlowController(
-            cumotion_robot=self.cumotion_robot,
-            cumotion_world_interface=self.world_interface,
-            robot_joint_space=self.robot_joint_space,
-            robot_site_space=self.robot_site_space,
-            rmp_flow_configuration_filename=str(
-                self.config.cumotion_dir / self.config.rmpflow_filename
-            ),
-            tool_frame=self.config.tool_frame,
-        )
-        return self.rmpflow_controller
-
-    def make_estimated_state(self) -> mg.RobotState:
-        """Create the current cuMotion joint state from the articulation."""
-        if not self.robot_joint_space:
-            raise RuntimeError("Call initialize_rmpflow() before requesting an RMPflow state.")
-        joint_indices = [
-            self.articulation.joint_names.index(name) for name in self.robot_joint_space
-        ]
-        joint_state = mg.JointState.from_name(
-            robot_joint_space=self.robot_joint_space,
-            positions=(
-                self.robot_joint_space,
-                self._torch_to_wp_float32(
-                    self.articulation.data.joint_pos[0, joint_indices]
-                ),
-            ),
-            velocities=(
-                self.robot_joint_space,
-                self._torch_to_wp_float32(
-                    self.articulation.data.joint_vel[0, joint_indices]
-                ),
-            ),
-        )
-        return mg.RobotState(joints=joint_state)
-
     def ee_pose_to_gripper_pose(
         self,
         position_base_ee: np.ndarray,
@@ -548,178 +397,61 @@ class YamRobot:
         )
         return position.astype(np.float32), rotation_base_gripper
 
-    def make_ee_target_state(
-        self,
-        position_base_ee: np.ndarray,
-        rotation_base_ee: Rotation,
-    ) -> mg.RobotState:
-        """Create an RMPflow target state from a BASE-frame manipulation EE pose."""
-        if not self.robot_site_space:
-            raise RuntimeError("Call initialize_rmpflow() before creating an EE target.")
-        position_gripper, rotation_gripper = self.ee_pose_to_gripper_pose(
-            position_base_ee,
-            rotation_base_ee,
-        )
-        target_position_wp = wp.array(
-            [position_gripper.tolist()], dtype=wp.float32, device="cpu"
-        )
-        target_orientation_wp = wp.array(
-            [self._rotation_to_wxyz(rotation_gripper).tolist()],
-            dtype=wp.float32,
-            device="cpu",
-        )
-        site_state = mg.SpatialState.from_name(
-            spatial_space=self.robot_site_space,
-            positions=([self.config.tool_frame], target_position_wp),
-            orientations=([self.config.tool_frame], target_orientation_wp),
-        )
-        return mg.RobotState(sites=site_state)
-
-    def reset_rmpflow(
-        self,
-        position_base_ee: np.ndarray,
-        rotation_base_ee: Rotation,
-        time_s: float = 0.0,
-    ) -> bool:
-        """Reset RMPflow using the current state and an initial EE target."""
-        if self.rmpflow_controller is None:
-            raise RuntimeError("Call initialize_rmpflow() before reset_rmpflow().")
-        return bool(
-            self.rmpflow_controller.reset(
-                estimated_state=self.make_estimated_state(),
-                setpoint_state=self.make_ee_target_state(
-                    position_base_ee,
-                    rotation_base_ee,
-                ),
-                t=time_s,
-            )
-        )
-
-    def compute_ee_joint_target(
-        self,
-        position_base_ee: np.ndarray,
-        rotation_base_ee: Rotation,
-        time_s: float,
-        gripper_opening_m: float | None = None,
-    ) -> torch.Tensor:
-        """Compute a full articulation position target for one EE-control step."""
-        if self.rmpflow_controller is None:
-            raise RuntimeError("Call initialize_rmpflow() before EE control.")
-        self.rmpflow_controller.forward(
-            estimated_state=self.make_estimated_state(),
-            setpoint_state=self.make_ee_target_state(
-                position_base_ee,
-                rotation_base_ee,
-            ),
-            t=time_s,
-        )
-        target = self.articulation.data.joint_pos.clone()
-        if self.rmpflow_controller._output_position is not None:
-            for joint_index, desired_position in zip(
-                self.rmpflow_controller._output_joint_indices.tolist(),
-                self.rmpflow_controller._output_position,
-            ):
-                target[0, joint_index] = float(desired_position)
-        if gripper_opening_m is not None:
-            target[0, self.gripper_joint_indices] = self.opening_to_joint_position(
-                gripper_opening_m
-            )
-        return target
-
-    def set_ee_pose_target(
-        self,
-        position_base_ee: np.ndarray,
-        rotation_base_ee: Rotation,
-        time_s: float,
-        gripper_opening_m: float | None = None,
-    ) -> torch.Tensor:
-        """Compute and apply one BASE-frame EE position-control target."""
-        target = self.compute_ee_joint_target(
-            position_base_ee,
-            rotation_base_ee,
-            time_s,
-            gripper_opening_m,
-        )
-        return self.set_joint_position_target(target)
-
     def get_ee_poses_base(self) -> torch.Tensor:
         """All native TCP poses on device, XYZW, without per-row CPU transfers."""
         from isaaclab.utils.math import quat_apply, subtract_frame_transforms
         data = self.articulation.data
-        position = data.body_pos_w.torch[:, self.tool_body_index]
-        rotation = data.body_quat_w.torch[:, self.tool_body_index]
+        position = data.body_pos_w[:, self.tool_body_index]
+        rotation = data.body_quat_w[:, self.tool_body_index]
         offset = torch.as_tensor(self.config.ee_position_in_gripper_m,
             dtype=position.dtype, device=position.device).expand_as(position)
         tcp = position + quat_apply(rotation, offset)
-        p, q = subtract_frame_transforms(data.root_pos_w.torch,
-            data.root_quat_w.torch, tcp, rotation)
-        return torch.cat([p, q], dim=-1)
+        p, q = subtract_frame_transforms(data.root_pos_w,
+            data.root_quat_w, tcp, rotation)
+        return torch.cat([p, q[:, [1, 2, 3, 0]]], dim=-1)
 
     def get_ee_pose_base(self, env_id: int = 0) -> tuple[np.ndarray, Rotation]:
         """Return the current manipulation EE pose expressed in robot BASE."""
-        gripper_position_world = (
-            self.articulation.data.body_pos_w.torch[env_id, self.tool_body_index]
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        rotation_world_gripper = Rotation.from_quat(
-            self.articulation.data.body_quat_w.torch[env_id, self.tool_body_index]
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        ee_position_world, rotation_world_ee = self.gripper_pose_to_ee_pose(
-            gripper_position_world,
-            rotation_world_gripper,
-        )
-        base_position_world = (
-            self.articulation.data.root_pos_w.torch[env_id].detach().cpu().numpy()
-        )
-        rotation_world_base = Rotation.from_quat(
-            self.articulation.data.root_quat_w.torch[env_id].detach().cpu().numpy()
-        )
-        rotation_base_world = rotation_world_base.inv()
-        return (
-            rotation_base_world.apply(ee_position_world - base_position_world).astype(
-                np.float32
-            ),
-            rotation_base_world * rotation_world_ee,
-        )
+        pose = self.get_ee_poses_base()[env_id].detach().cpu().numpy()
+        return pose[:3], Rotation.from_quat(pose[3:])
 
     def get_ee_jacobian_base(self) -> torch.Tensor:
-        """Native link-origin Jacobian shifted to TCP and expressed in BASE.
+        """PhysX COM Jacobian shifted to TCP, expressed in BASE (Lab 2.1).
 
-        The installed PhysX API exposes COM and link-origin Jacobians separately.
-        Use the link quantity, then v_TCP = v_link + omega cross r_TCP.
+        Raw PhysX columns include six root DOFs only for floating articulations.
+        The TCP offset is relative to the actor origin, not its centre of mass.
+        Validate this boundary with test_cartesian_adapter before collecting.
         """
-        from isaaclab.utils.math import quat_apply, quat_apply_inverse
+        from isaaclab.utils.math import quat_apply, quat_conjugate
         art = self.articulation
         if not art.is_fixed_base and not getattr(self, '_cartesian_anchor_checked', False):
-            # The supplied USD is world-anchored but PhysX reports six root DOFs.
-            # Confirm the authored anchor rather than assuming the common fixed-
-            # root tensor layout or allowing a genuinely free-floating robot.
-            base_path = str(art.root_view.prim_paths[0])
-            anchor_path = base_path.removesuffix('/Geometry/world/base') + '/Physics/world_to_base'
-            anchor = UsdPhysics.FixedJoint.Get(sim_utils.get_current_stage(), anchor_path)
-            if not anchor or anchor.GetJointEnabledAttr().Get() is False:
-                raise ValueError('Cartesian controller requires the world-anchored YAM asset')
-            if not any(str(path) == base_path for path in anchor.GetBody1Rel().GetTargets()):
-                raise ValueError('World anchor is not attached to this articulation BASE')
+            base_paths = sim_utils.find_matching_prim_paths(art.cfg.prim_path)
+            if len(base_paths) != art.data.root_quat_w.shape[0]:
+                raise ValueError('Cannot resolve every articulation world anchor')
+            for base_path in base_paths:
+                anchor_path = str(base_path).removesuffix('/Geometry/world/base') + '/Physics/world_to_base'
+                anchor = UsdPhysics.FixedJoint.Get(sim_utils.get_current_stage(), anchor_path)
+                if (not anchor or anchor.GetJointEnabledAttr().Get() is False
+                        or str(base_path) not in [str(p) for p in anchor.GetBody1Rel().GetTargets()]):
+                    raise ValueError('Cartesian controller requires world-anchored YAM assets')
             self._cartesian_anchor_checked = True
-        root_quat = art.data.root_quat_w.torch
+        raw = art.root_physx_view.get_jacobians()
+        root_columns = raw.shape[-1] - art.num_joints
+        if root_columns != (0 if art.is_fixed_base else 6):
+            raise RuntimeError('Unexpected PhysX Jacobian layout')
+        columns = [root_columns + index for index in self.arm_joint_indices]
         body = self.tool_body_index - int(art.is_fixed_base)
-        columns = [art.num_base_dofs + index for index in self.arm_joint_indices]
-        jacobian = art.data.body_link_jacobian_w.torch[:, body, :, :][:, :, columns].clone()
+        jacobian = raw[:, body, :, :][:, :, columns].clone()
         offset = torch.as_tensor(self.config.ee_position_in_gripper_m, device=jacobian.device,
                                  dtype=jacobian.dtype).expand(jacobian.shape[0], -1)
-        offset_world = quat_apply(art.data.body_quat_w.torch[:, self.tool_body_index], offset)
+        offset = offset - art.data.com_pos_b[:, self.tool_body_index]
+        offset_world = quat_apply(art.data.body_quat_w[:, self.tool_body_index], offset)
         jacobian[:, :3] += torch.cross(jacobian[:, 3:].transpose(1, 2),
             offset_world[:, None, :].expand(-1, len(columns), -1), dim=-1).transpose(1, 2)
         for block in (slice(0, 3), slice(3, 6)):
             vectors = jacobian[:, block, :].transpose(1, 2)
-            quaternions = root_quat[:, None, :].expand(-1, len(columns), -1)
-            jacobian[:, block, :] = quat_apply_inverse(quaternions.reshape(-1, 4),
+            quaternions = quat_conjugate(art.data.root_quat_w)[:, None, :].expand(-1, len(columns), -1)
+            jacobian[:, block, :] = quat_apply(quaternions.reshape(-1, 4),
                 vectors.reshape(-1, 3)).reshape(-1, len(columns), 3).transpose(1, 2)
         return jacobian
 
@@ -776,7 +508,7 @@ class YamRobot:
                 raise ValueError("Joint target length does not match joint_names.")
             for name, value in zip(names, values):
                 target[0, self.articulation.joint_names.index(name)] = float(value)
-        self.articulation.set_joint_position_target_index(target=target)
+        self.articulation.set_joint_position_target(target=target)
         return target
 
     def write_data_to_sim(self) -> None:

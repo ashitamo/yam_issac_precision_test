@@ -1,5 +1,10 @@
 # YAM Pick-and-Insert
 
+> 此分支：`compat/isaaclab-2.1`，目標為 **Isaac Lab 2.1.0 + Isaac Sim 4.5.0 + Python 3.10**。
+> 原 Isaac Sim 6 版本保留在 `main`（分支起點 `d234683`）。
+> 已通過 CPU 契約測試；Ubuntu 550.144.03 的原生模擬／接觸／相機尚待驗證。
+> 下方既有收集統計與效能數字屬於 main，不代表本分支已完成原生驗證。
+
 YAM 夾取白色 peg，搬運至黑色工件並插入、開爪，最後確認 peg 落底。
 目前可開啟環境、執行 scripted expert，以及**多環境 RGB-D 收集與可選 action 回播**。
 已提供四種公差的 17×17 全網格批次收集；正式資料分割與 learned policy 訓練尚未完成。
@@ -9,12 +14,31 @@ YAM 夾取白色 peg，搬運至黑色工件並插入、開爪，最後確認 pe
 
 ### Ubuntu 22.04／RTX 4090 ×2（新機）
 
-以下是**已安裝相容 Isaac Sim／Isaac Lab 環境後**的啟動方式，不是安裝腳本。
-Ubuntu 新機尚未實測；先對齊 HANDOVER 的版本／Isaac Lab commit，不要直接裝最新版。
+請建立獨立環境，**不要在既有 Isaac Sim 6 conda 環境內降級**。
+本分支固定 v2.1.0，不要改裝最新版或直接跟著 v2.1.1 的 CUDA 12.8 安裝範例。
+參考 [官方 v2.1.0 安裝文件](https://isaac-sim.github.io/IsaacLab/v2.1.0/source/setup/installation/pip_installation.html)。
+
+```bash
+conda create -n env_yam21 python=3.10 -y
+conda activate env_yam21
+python -m pip install --upgrade pip
+python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+python -m pip install 'isaacsim[all,extscache]==4.5.0' --extra-index-url https://pypi.nvidia.com
+git clone --branch v2.1.0 --depth 1 https://github.com/isaac-sim/IsaacLab.git ~/IsaacLab-2.1
+cd ~/IsaacLab-2.1
+./isaaclab.sh --install none
+cd /path/to/yam_issac_precision_test
+git switch compat/isaaclab-2.1
+python -m pip install 'numpy==1.26.4' 'scipy==1.15.3' 'h5py==3.12.1' 'trimesh==4.6.8' 'Pillow==11.1.0'
+python -m pip check
+```
+
+這是目標安裝配方，不是已在 Ubuntu 實測的完整 lockfile；若 pip check 衝突，先保留錯誤，不要強制忽略。
+驅動維持 550 不在此修改；仍須先確認 Isaac Sim 4.5 能啟動，不能以跳過 driver check 代替驗證。
 複製專案程式、assets、unit_test 與文件；不要複製 Windows conda 環境。
 
 ```bash
-conda activate env_yam                    # 使用新機實際建立的環境名稱
+conda activate env_yam21                    # 使用新機實際建立的環境名稱
 cd /path/to/yam_issac_precision_test      # 換成實際專案位置
 nvidia-smi
 python -B -m unittest discover -s unit_test -p 'unittest_*.py' -q
@@ -23,9 +47,12 @@ python -B -m unittest discover -s unit_test -p 'unittest_*.py' -q
 開啟場景（需要可用的本機桌面／顯示環境）：
 
 ```bash
-python -u run_environment.py --viz kit --device cuda:0
-python -u run_environment.py --viz kit --device cuda:0 --expert --grid_id r08_c08
+python -u run_environment.py  --device cuda:0
+python -u run_environment.py  --device cuda:0 --expert --grid_id r08_c08
 ```
+
+先依 HANDOVER 的順序完成資產、reset、Jacobian 與單次任務驗證。
+**尚未通過之前不要啟動全網格收集。** 小批收集使用獨立新目錄，不能續寫 main 的 campaign。
 
 先用 GPU 0 做四孔位、baseline RGB-D 收集與回播驗證：
 
@@ -41,7 +68,7 @@ python -u record_expert_data.py --headless --device cuda:0 \
 測第二張卡。全網格 supervisor 目前固定啟動 GPU 0，尚無雙 GPU 分片排程。
 不要讓兩個程序寫同一個 data_dir。完整雙卡試跑與背景執行說明見 HANDOVER。
 
-### Windows（原開發機）
+### Windows（原開發機，main 的歷史環境）
 
 在 PowerShell 執行：
 
@@ -50,7 +77,8 @@ conda activate env_isaaclab6_win
 Set-Location C:\Users\hsun91\Desktop\yam_issac_precision_test
 ```
 
-以下指令均從專案根目錄執行，並使用此 conda 環境的 Python。
+上面的 env_isaaclab6_win 只用於 main，不可執行此相容分支。此分支需另建 Python 3.10／Sim 4.5 環境；Windows 原生相容版尚未測試。
+以下指令均從專案根目錄執行，使用目前分支對應的 Python。
 原機查得 isaacsim distribution 為 6.0.1.0、isaaclab 為 6.1.14，另需 h5py、SciPy、
 trimesh 等依賴。資產在本專案內，但其他電腦仍須另外安裝相容的 Isaac Lab／
 Isaac Sim 與 Python 環境；只複製資料夾不等於完成 runtime 安裝。
@@ -60,7 +88,7 @@ Isaac Sim 與 Python 環境；只複製資料夾不等於完成 runtime 安裝�
 ### 只看場景與腕部相機，不執行任務
 
 ```powershell
-python -u .\run_environment.py --viz kit
+python -u .\run_environment.py
 ```
 
 視窗會保持開啟，關閉視窗結束。相機是理想 D405 RGB／depth，不含實體噪聲模型。
@@ -69,7 +97,7 @@ GUI 的 Camera 選單可切換到場景內的 D405 Camera。
 ### 看 expert 完成夾取與插入
 
 ```powershell
-python -u .\run_environment.py --viz kit --expert --grid_id r08_c08
+python -u .\run_environment.py  --expert --grid_id r08_c08
 ```
 
 `r08_c08` 是 17×17 網格的中心點。任務完成或失敗後程式會退出。
@@ -81,7 +109,7 @@ python -u .\run_environment.py --viz kit --expert --grid_id r08_c08
 
 | 參數 | 用途 |
 | --- | --- |
-| `--headless` | 無視窗執行，取代 `--viz kit` |
+| `--headless` | 無視窗執行，GUI 不加此參數 |
 | `--clearance_mm 0.5` | 單側徑向間隙；可選 1.0／0.5／0.25／0.1，預設 0.5 |
 | `--max_steps 240` | 限制物理步數；預設 0，無 expert 時持續顯示 |
 | `--camera_snapshot outputs\camera.png` | 暖機後保存一張腕部 RGB 預覽 |
@@ -98,7 +126,7 @@ python -u .\record_expert_data.py --headless --num_envs 4 --grid_ids r08_c08 r00
 ```
 
 不需要每回合回播時，移除 `--replay` 即可省下驗證回播時間。
-看收集畫面時，把 `--headless` 換成 `--viz kit`。
+看收集畫面時，移除 `--headless`。
 
 每個孔位重複收兩回合（共 8 回合）：
 
@@ -116,7 +144,7 @@ python -u .\record_expert_data.py --headless --num_envs 4 --grid_ids r08_c08 r00
 | `--clearance_mm` | 單側徑向間隙，預設 0.5 |
 | `--servo_hz` | 60／120／240 Hz，預設仍為 240；低頻是比較選項，不代表所有位置均已驗證 |
 | `--solver_profile` | 預設 baseline（64/16）；low_iter_candidate（16/4）只允許 0.50 mm |
-| `--profile` | 額外量測原生 simulate／fetch_results，摘要中的時間可能重疊，不可直接相加 |
+| `--profile` | 額外量測整體 SimulationContext.step，摘要中的巢狀時間不可直接相加；舊版不分開量 simulate／fetch |
 | `--replay` | 額外重播每批保存的 action，檢查成功與 TCP 差異 |
 | `--data_dir` | 必須是新的空資料夾，不覆寫或續寫已有 dataset |
 | `--max_wall_seconds` | 收集迴圈（含可選回播）的總時間上限，預設 3600 s |
@@ -226,7 +254,7 @@ python -u .\test_cartesian_adapter.py --headless --expert --output_dir .\outputs
 多環境 expert 示範（無相機、不是 dataset collector）：
 
 ```powershell
-python -u .\test_parallel_expert.py --num_envs 4 --grid_ids r08_c08 r00_c00 r00_c16 r16_c16 --clearance_mm 0.5 --output_dir .\outputs\parallel_check_001 --viz kit
+python -u .\test_parallel_expert.py --num_envs 4 --grid_ids r08_c08 r00_c00 r00_c16 r16_c16 --clearance_mm 0.5 --output_dir .\outputs\parallel_check_001
 ```
 
 現有部分驗證工具會拒絕覆寫，請使用新目錄。來源 fingerprint 改變後不要強制

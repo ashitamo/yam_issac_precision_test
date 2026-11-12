@@ -16,30 +16,20 @@ class RolloutProfiler:
 
     @contextmanager
     def engine_calls(self, manager):
-        """Temporarily time native calls without modifying installed Isaac Lab.
+        """Time the whole Lab 2.1 step, not separate simulate/fetch calls.
 
-        simulate may return before GPU completion; fetch includes waiting, not
-        necessarily just transfer cost. This does not add synchronization.
+        The newer physics_manager is unavailable in Lab 2.1. This inclusive
+        timer is deliberately named differently; it is not GPU kernel timing.
         """
-        if isinstance(manager, str):
-            from isaaclab.utils.string import string_to_callable
-            manager = string_to_callable(str(manager))
-        interface = manager._physx_sim
-        profiler = self
-        class TimedInterface:
-            def __getattr__(self, name):
-                method = getattr(interface, name)
-                if name not in ("simulate", "fetch_results"):
-                    return method
-                def measured(*args, **kwargs):
-                    with profiler.section('engine.' + name):
-                        return method(*args, **kwargs)
-                return measured
-        manager._physx_sim = TimedInterface()
+        original = manager.step
+        def measured(*args, **kwargs):
+            with self.section('engine.step_inclusive'):
+                return original(*args, **kwargs)
+        manager.step = measured
         try:
             yield
         finally:
-            manager._physx_sim = interface
+            manager.step = original
 
     @contextmanager
     def section(self, name):
@@ -82,7 +72,7 @@ class RolloutProfiler:
                    "command/scene/observe are disjoint; scene.write/scene.physics/scene.update are nested within scene.",
                    "cProfile adds overhead. Compare with an unprofiled identical-case run before claiming speedup.",
                    "Native-engine work can be absent from cProfile; section wall timers are authoritative for phase totals.",
-                   "engine.simulate/fetch_results are nested in scene.physics; fetch includes engine completion waits, not just data transfer.",
+                   "Lab 2.1 engine.step_inclusive includes the complete SimulationContext.step; no separate simulate/fetch attribution is available.",
                    "cumulative function timings overlap; do not sum them."])
         (output_dir / 'profile.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         stream = io.StringIO()

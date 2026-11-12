@@ -19,16 +19,10 @@ def main():
     try:
         import torch
         import isaaclab.sim as sim_utils
-        from isaaclab_physx.physics import PhysxCfg
+        from env_yam import create_simulation
         import env_config as cfg
         from env_yam import ParallelYamScene, tensor
-        sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
-            dt=cfg.PHYSICS_DT_S, device=args.device,
-            physics=PhysxCfg(
-                min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
-                min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS,
-                enable_external_forces_every_iteration=cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION,
-                solve_articulation_contact_last=cfg.SOLVE_ARTICULATION_CONTACT_LAST)))
+        sim = create_simulation(args.device)
         light = sim_utils.DomeLightCfg(intensity=cfg.LIGHT_INTENSITY)
         light.func("/World/Light", light)
         sim.set_camera_view((4., 4., 3.), (0., 0., 0.))
@@ -42,7 +36,7 @@ def main():
         moved = before[:1].clone()
         moved[:, 0] += 0.05
         ids = torch.tensor([0], device=sim.device)
-        art.write_joint_state_to_sim_index(position=moved, velocity=torch.zeros_like(moved), env_ids=ids)
+        art.write_joint_state_to_sim(position=moved, velocity=torch.zeros_like(moved), env_ids=ids)
         unaffected = tensor(art.data.joint_pos)[1:].clone()
         scene.reset([0])
         torch.testing.assert_close(tensor(art.data.joint_pos)[0], before[0])
