@@ -1,0 +1,16 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.urdf text eol=lf
+*.xrdf text eol=lf
+*.usda text eol=lf
+*.usd binary
+*.usdc binary
+*.stl binary
+*.png binary
+*.jpg binary
+*.hdf5 binary

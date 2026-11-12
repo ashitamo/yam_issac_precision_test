@@ -1,0 +1,298 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.3"
+    }
+    defaultPrim = "output"
+    doc = """Generated from Composed Stage of root layer /tmp/tmpdlml01so/output.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_yam_isaac_with_gripper_41ekijj8/usdex_yam_isaac_with_gripper/output.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_yam_isaac_with_gripper_41ekijj8/temp_yam_isaac_with_gripper/yam_isaac_with_gripper.usd
+
+
+Generated from Composed Stage of root layer /home/hsun91/yam_isaac_ws/assets/yam_robot_with_gripper/usd/yam_isaac_with_gripper/payloads/base.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "output"
+{
+    over "Geometry"
+    {
+        over "world"
+        {
+            over "base" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsArticulationRootAPI", "NewtonArticulationRootAPI", "PhysicsMassAPI"]
+            )
+            {
+                bool newton:selfCollisionEnabled = 0
+                point3f physics:centerOfMass = (0.0000383001, -0.0000240073, 0.0247678)
+                float3 physics:diagonalInertia = (0.0006783059, 0.0015705907, 0.0016940404)
+                float physics:mass = 0.873654
+                quatf physics:principalAxes = (-0.49979255, 0.500087, 0.5007381, 0.4993814)
+
+                over "link1" (
+                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                )
+                {
+                    point3f physics:centerOfMass = (-0.00261782, 0.00744082, 0.0237251)
+                    float3 physics:diagonalInertia = (0.00004847801, 0.00010962764, 0.00013902315)
+                    float physics:mass = 0.104154
+                    quatf physics:principalAxes = (0.88020587, -0.47151327, -0.028459536, 0.045857724)
+
+                    over "link2" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        point3f physics:centerOfMass = (0.129165, 0.000134495, -0.0321253)
+                        float3 physics:diagonalInertia = (0.00080008927, 0.014599001, 0.0146686)
+                        float physics:mass = 1.46908
+                        quatf physics:principalAxes = (0.7071639, -0.70704967, -0.00009112778, 0.000069038644)
+
+                        over "link3" (
+                            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                        )
+                        {
+                            point3f physics:centerOfMass = (0.0556042, -0.135083, -0.0340514)
+                            float3 physics:diagonalInertia = (0.00087644195, 0.0076296045, 0.0076519796)
+                            float physics:mass = 0.982553
+                            quatf physics:principalAxes = (-0.4118826, 0.5318356, 0.58429956, 0.4539798)
+
+                            over "link4" (
+                                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                            )
+                            {
+                                point3f physics:centerOfMass = (-0.0543529, 0.057068, -0.0332231)
+                                float3 physics:diagonalInertia = (0.00029577577, 0.00079127355, 0.00081785466)
+                                float physics:mass = 0.46678
+                                quatf physics:principalAxes = (0.7117165, -0.62361276, 0.18782984, 0.26322368)
+
+                                over "link5" (
+                                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                                )
+                                {
+                                    point3f physics:centerOfMass = (-0.0000355003, -0.00717397, 0.0375847)
+                                    float3 physics:diagonalInertia = (0.00016964736, 0.00019568621, 0.00021979444)
+                                    float physics:mass = 0.403307
+                                    quatf physics:principalAxes = (0.6466757, -0.29293972, -0.6424023, -0.28864542)
+
+                                    over "gripper" (
+                                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                                    )
+                                    {
+                                        point3f physics:centerOfMass = (-0.0002493, 0.0000356, 0.0293133)
+                                        float3 physics:diagonalInertia = (0.00032441493, 0.00036975817, 0.0004096859)
+                                        float physics:mass = 0.553219
+                                        quatf physics:principalAxes = (-0.03581733, -0.71262634, -0.04031706, 0.699468)
+
+                                        over "tip_left" (
+                                            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                                        )
+                                        {
+                                            point3f physics:centerOfMass = (-0.0224716, 0.0143408, -0.0426253)
+                                            float3 physics:diagonalInertia = (0.000028359069, 0.000060107872, 0.00006241926)
+                                            float physics:mass = 0.0710042
+                                            quatf physics:principalAxes = (0.8418043, 0.31201696, 0.19784497, 0.3935331)
+                                        }
+
+                                        over "tip_right" (
+                                            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                                        )
+                                        {
+                                            point3f physics:centerOfMass = (-0.0143408, -0.0224716, -0.0426253)
+                                            float3 physics:diagonalInertia = (0.000028359069, 0.000060107872, 0.00006241926)
+                                            float physics:mass = 0.0710042
+                                            quatf physics:principalAxes = (0.8735154, 0.080731794, 0.36052683, -0.3169756)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    over "Physics"
+    {
+        def PhysicsPrismaticJoint "joint7" (
+            prepend apiSchemas = ["PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            float drive:linear:physics:maxForce = 10
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base/link1/link2/link3/link4/link5/gripper>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1/link2/link3/link4/link5/gripper/tip_left>
+            point3f physics:localPos0 = (-0.0450619, 0.0226677, 0.05456)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (3.4904777e-9, -0.7071064, -0.000005198187, 0.7071071)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -0.0475
+            float physics:upperLimit = 0
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsPrismaticJoint "joint8" (
+            prepend apiSchemas = ["NewtonMimicAPI", "PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            float drive:linear:physics:maxForce = 10
+            rel newton:mimicJoint = </output/Physics/joint7>
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base/link1/link2/link3/link4/link5/gripper>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1/link2/link3/link4/link5/gripper/tip_right>
+            point3f physics:localPos0 = (0.045062, -0.0226681, 0.0545598)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.5000025, -0.4999993, 0.49999937, -0.49999884)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -0.0475
+            float physics:upperLimit = 0
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsRevoluteJoint "joint6" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:maxForce = 10
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base/link1/link2/link3/link4/link5>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1/link2/link3/link4/link5/gripper>
+            point3f physics:localPos0 = (2.39858e-7, -0.0419481, 0.0404996)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (9.38184e-7, -9.381874e-7, -0.7071081, 0.70710546)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -120.00028
+            float physics:upperLimit = 120.00028
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsRevoluteJoint "joint5" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:maxForce = 10
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base/link1/link2/link3/link4>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1/link2/link3/link4/link5>
+            point3f physics:localPos0 = (-0.0403003, 0.0703851, -0.0323887)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (-9.38184e-7, 0.70710546, 9.381874e-7, 0.7071081)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -90.00021
+            float physics:upperLimit = 90.00021
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsRevoluteJoint "joint4" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:maxForce = 10
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base/link1/link2/link3>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1/link2/link3/link4>
+            point3f physics:localPos0 = (0.0600003, -0.244999, -0.00205)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (-0.0000013267949, -3.330669e-16, 1.110223e-16, 1)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -90.00021
+            float physics:upperLimit = 90.00021
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsRevoluteJoint "joint3" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:maxForce = 10
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base/link1/link2>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1/link2/link3>
+            point3f physics:localPos0 = (0.264, 4.08431e-7, -0.06375)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (9.381839e-7, -0.70710546, -0.7071081, 9.381874e-7)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = 0
+            float physics:upperLimit = 209.99992
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsRevoluteJoint "joint2" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:maxForce = 10
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base/link1>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1/link2>
+            point3f physics:localPos0 = (-0.0329, 0.02, 0.0455)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.49999815, 0.5, -0.50000185, -0.5)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = 0
+            float physics:upperLimit = 179.99985
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsRevoluteJoint "joint1" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:maxForce = 10
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </output/Geometry/world/base>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base/link1>
+            point3f physics:localPos0 = (-1.249e-16, -1.38692e-16, 0.067)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (-0.70710546, 0, 0, 0.7071081)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -149.99977
+            float physics:upperLimit = 175.00021
+            custom float urdf:limit:effort = 10
+            custom float urdf:limit:velocity = 10
+        }
+
+        def PhysicsFixedJoint "world_to_base"
+        {
+            custom rel physics:body0
+            prepend rel physics:body0 = </output>
+            custom rel physics:body1
+            prepend rel physics:body1 = </output/Geometry/world/base>
+            point3f physics:localPos0 = (0, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+    }
+}
+

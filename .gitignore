@@ -1,0 +1,63 @@
+# Generated datasets / simulation results: keep only the folder guides.
+/data/*
+!/data/README.md
+/outputs/*
+!/outputs/README.md
+/validation/
+/archive/*
+!/archive/README.md
+
+# Python / local environments / test caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+/env/
+*.egg-info/
+build/
+dist/
+
+# Editor / OS / local tool state.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+.codex/
+.agents/
+
+# Credentials (never add actual secrets).
+.env
+.env.*
+!.env.example
+.aws/
+.ssh/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Large recordings / transient artifacts accidentally written outside data/.
+*.hdf5
+*.h5
+*.ply
+*.pcd
+*.log
+*.pstats
+*.tmp
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# assets/ USD, STL, URDF, XRDF, YAML and third-party licenses are intentional.

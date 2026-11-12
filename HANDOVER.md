@@ -1,0 +1,234 @@
+# YAM Pick-and-Insert 交接
+
+更新：2026-11-12。目標機：Ubuntu 22.04、RTX 4090 ×2。
+**這是文件交接，不代表 Ubuntu 安裝／雙卡驗證已完成。收集目前按要求停止。**
+日常指令保留在 [README](README.md)；本文件說明版本、設計、資料與風險。
+
+## 1. 專案現況與範圍
+
+YAM 從桌上實際夾取白色 peg，lift、transfer、align、insert、release，
+以原生物理狀態判斷落底，不把 peg 固定在末端。
+工件為 assets/workpiece.stl，黑色靜態通孔碰撞；腕部理想 D405 產生 RGB-D。
+
+已完成 scripted expert、共享環境、Cartesian adapter、並行 RGB-D／HDF5、
+四種公差全網格排程、來源檢查與進度保存。55 個 CPU 單元測試曾通過。
+未完成正式 Train/Validation/Evaluation manifests、ACT／DP loader／training、
+雙卡全網格分片、跨系統續收移植與 Ubuntu 原生驗證。不要把工程測試標為 B 全完成。
+
+## 2. 原機版本：先固定，不要同時升級
+
+下列是 Windows 原機實際查得的 Python distribution 版本，不是 Linux lockfile，
+也不保證同名同版 Linux wheel 都可直接下載：
+
+| 元件 | 原機版本 |
+| --- | --- |
+| Python | 3.12 系列 |
+| isaacsim | 6.0.1.0 |
+| isaaclab | 6.1.14，editable source 安裝 |
+| isaaclab_physx | 1.1.3 |
+| torch | 2.10.0+cu128 |
+| warp-lang | 1.13.0 |
+| numpy／scipy | 2.3.1／1.17.0 |
+| h5py／trimesh | 3.16.0／4.11.1 |
+
+原 Isaac Lab checkout commit：
+
+```text
+c2e46a0139fc81b016d2eb8bf1d8d6b4c5a1587d
+```
+
+原機安裝位置是舊工作區 IsaacLab_isaac6/source/isaaclab，**不是本專案內
+附帶了一套 Isaac Lab**。本地 git status 的已見修改在舊 scripts/yam 測試／腳本，
+不要把整個 dirty checkout 當成乾淨 release。接手者應核對 core library diff。
+以 commit 與實際 API 為準，不要猜目前 package 版本等於官網同名 release tag。
+
+Ubuntu 重建順序：
+
+1. 裝相容 NVIDIA driver，nvidia-smi 確認兩張卡可見；先跑官方 Compatibility Checker。
+2. 建立 Python 3.12 環境，在 Linux 安裝相符的 Isaac Sim 與對應 Isaac Lab source。
+3. 確認 PhysX backend、Torch／CUDA／Warp、h5py、SciPy、trimesh 可用；
+   正式收集前記錄 Linux 實際 versions、driver 與 git commit。
+4. 核對 robot_yam.py 頂端啟用的兩個 extension：
+   isaacsim.robot_motion.experimental.motion_generation、isaacsim.robot_motion.cumotion。
+   目前即使用 DIK，robot wrapper 仍會匯入它們；extension 缺失不能當作可忽略 warning。
+5. 不要複製 Windows conda／site-packages，不要直接 pip freeze 原機所有套件安裝到 Linux；
+   路徑、二進位 wheel、平台套件與 editable 安裝需要重建。
+
+官方參考：
+[Isaac Sim 6.0 requirements](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/requirements.html)、
+[Python environment installation](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/install_python.html)。
+官方列 Ubuntu 22.04/24.04；安裝文件示例 wheel 版本可能與本機 distribution 字串不同，
+必須確認取得的 Linux build，不要把示例版本視為已驗證替代品。
+
+## 3. 要搬哪些資料
+
+必要：根目錄程式、assets/、unit_test/、README、HANDOVER、docs/。
+驗證／資料追溯：data/、validation/、archive/ 與相關 outputs/，可另存資料碟，
+但不要只搬 HDF5 而丟掉 campaign／manifest／metadata／log。
+不必搬 __pycache__、Windows conda 環境或舊工作區其他 YAM 示範程式。
+本專案資產路徑依 Path(__file__) 定位；Linux 檔名大小寫須一致，
+USD 的外部 reference 是否完整，仍需新機資產測試確認。
+
+本次不自動修改依賴、程式、舊 checkpoint 或搬動已收資料。
+
+## 4. 建議接手驗證順序
+
+所有命令從專案根目錄，以已配置好的 Isaac Lab Python 執行。輸出用新目錄。
+
+```bash
+python -B -m unittest discover -s unit_test -p 'unittest_*.py' -q
+python -u run_environment.py --headless --device cuda:0 --max_steps 24 \
+  --output_dir outputs/ubuntu_smoke_001 --camera_snapshot outputs/ubuntu_smoke_001/rgb.png
+python -u test_cartesian_adapter.py --headless --device cuda:0 --expert \
+  --output_dir outputs/ubuntu_cartesian_001
+python -u record_expert_data.py --headless --device cuda:0 --num_envs 4 \
+  --grid_ids r08_c08 r00_c00 r00_c16 r16_c16 --clearance_mm 0.5 \
+  --servo_hz 240 --solver_profile baseline --compression gzip \
+  --data_dir data/ubuntu_baseline_001 --replay
+```
+
+然後用新的 data_dir 分別驗證 1.00／0.25／0.10 mm，不直接在新機重跑 1,156 回合。
+看 stdout 是否正常退出、collection_summary.passed、每回合 manifest、PNG、
+HDF5 時序與 replay gate。GUI 需桌面環境；SSH headless 不等於遠端 GUI 可直接打開。
+先比較 4／8 環境再擴大，不假設 4090 比 3060 的速度等比例提高。
+
+## 5. 雙 RTX 4090 的使用界限
+
+目前固定孔位 collector 可選 --device cuda:0／cuda:1；AppLauncher 目前 source
+會把 physics_gpu 與 active_gpu 指向該 device。仍應用 nvidia-smi 查證新機實際
+physics／RTX 顯存配置，不假設 CUDA_VISIBLE_DEVICES 重新編號後的渲染選卡一定相同。
+兩張卡不自動合併顯存；目前沒有 DDP 訓練或單一 collector 的多 GPU 分片。
+
+兩終端、各一張卡的**待驗證小批配置**如下，位置與輸出目錄不同：
+
+```bash
+# 終端 A
+python -u record_expert_data.py --headless --device cuda:0 --num_envs 2 \
+  --grid_ids r08_c08 r00_c00 --compression gzip --data_dir data/gpu0_smoke_001 --replay
+# 終端 B（先單獨測 GPU 1，確認後再同時跑）
+python -u record_expert_data.py --headless --device cuda:1 --num_envs 2 \
+  --grid_ids r00_c16 r16_c16 --compression gzip --data_dir data/gpu1_smoke_001 --replay
+```
+
+本機尚未驗證這兩程序在 Ubuntu 同時運作；需檢查 RTX 是否搶卡、RAM、CPU 與
+NVMe 吞吐。不要宣稱此配置已完成雙卡全網格收集。
+--all_grid supervisor 會硬編碼子程序 --device cuda:0，且不接受 --device；
+不能直接把上面的 GPU 1 用法套到它。兩個 --all_grid 即使不同資料夾也會重複
+整份網格，不是分片；同資料夾則有 lock／資料競爭風險，不要這樣啟動。
+未實作自動跨機／跨 GPU 排程，之後需以不重疊 case ID 的 manifests 分片。
+
+## 6. 程式閱讀順序
+
+| 檔案 | 責任 |
+| --- | --- |
+| env_config.py | 物理、相機、網格、expert 與候選 solver 設定 |
+| robot_yam.py | 本地 YAM 資產、碰撞、actuator／gravity FF、原生 TCP Jacobian |
+| env_yam.py | ParallelYamScene → joint env → Cartesian adapter |
+| env_expert.py | 單列 phase controller 與多列 expert；只讀共享 observation 的新路徑 |
+| env_task.py | 成功／落底與共用幾何診斷 |
+| env_dataset.py | 批次相機列對應、時間同步、分塊 HDF5 與 episode 驗證 |
+| env_workspace_grid.py | 17×17 grid 與既有離線 FK／IK 篩查 |
+| record_expert_data.py | 固定孔位 worker、audit／可選 replay，以及 --all_grid supervisor |
+| env_profiling.py | 可選原生 simulate／fetch 計時，不改已安裝 Isaac Lab |
+
+run_environment 使用同一套場景，但是 joint-space viewer；不錄製 HDF5。
+collector 使用 Cartesian adapter；不要把兩種 action 混用。
+原生 runtime IK 是 Isaac Lab DifferentialIKController，expert／離線網格還有
+舊 SciPy FK／IK，並非整套 expert 全 GPU 向量化。FrameView／Jacobian layouts
+有目前版本特有之處，升級前需重跑 native probe。
+test_*.py 為手動模擬驗證；unit_test/unittest_*.py 為 CPU 測試，無需逐支啟動。
+舊 test_environment_A.py 含 Windows 特定程序檢查，不是 Ubuntu 主收集入口。
+
+## 7. 控制、座標與物理契約
+
+- SI：m、rad、s；pose quaternion XYZW，action 不是 Euler。
+- Cartesian action：[dp_BASE(3), drotvec_BASE(3), 總開口絕對值(1)]。
+  p*=p_measured+dp，R*=Exp(dr)@R_measured，目標每 policy tick 只組合一次。
+- policy／相機 30 Hz；物理 240 Hz；servo 240／120／60 Hz，預設 240。
+  drive 每物理步作用，重力 FF／joint target 按 servo 更新並保持。
+- action norm 上限：平移 20 mm，rotvec 0.2 rad。policy 越界拒絕；
+  expert 另有顯式 reference governor，記錄的是實際發出的限制後 action。
+- TCP 在 gripper local [0,0,0.14472] m，姿態沿用 gripper，不是單指尖。
+- arm 10 Nm／3 rad/s、Kp 400／Kd 40。PD 額度預留 gravity FF，不能簡單
+  把額外重力 effort 加到已滿的 10 Nm drive 上。
+- finger 每指 1.5 N／0.02 m/s、Kp 1000／Kd 17；開口是兩指總內側距離，
+  joint7/8 為負值張開，不能把總開口直接當單指 command。
+- baseline solver 64/16；low_iter_candidate 為 16/4，只允許 0.50 mm。
+  正式跨-clearance 比較需固定共同驗證的數值設定，不混用 profile 當唯一變因。
+- CPU backend 曾 lift 停滯，不推薦為加速方案。剛體／摩擦與感測模型不是實機標定。
+
+環境目前以平移分隔、BASE 軸向一致，不是任意旋轉 base 都已驗證。
+不自動 reset；先存 terminal snapshot，再明確 reset。終止於 servo tick 中途
+時，影像與 measurement timestamp 必須是實際終止子步，不可標成之後的狀態。
+成功包含 lift 歷史、開爪、孔內、深度至少 30 mm、接近桌面落底、速度與穩定時間；
+歷史最大徑向／底部幾何診斷門檻為 0.050 mm，不等於 PhysX contact_offset
+（20 µm）。不要為了 throughput 放寬成功標準。
+
+## 8. Dataset 與全網格排程
+
+公差指單側 radial clearance：(hole diameter - peg diameter)/2。
+nominal hole 10 mm，四種 peg diameter 為 8／9／9.5／9.8 mm，長 50 mm、25 g。
+STL 孔為多邊形，內切半徑約 4.992667 mm，effective clearance 略小於 nominal。
+17×17、200×200 mm、間距 12.5 mm；中心 r08_c08，候選棋盤格標籤不是正式 split。
+
+HDF5 有 T actions／T+1 observations；RGB uint8、axial depth float32 m、
+depth_valid mask。policy 白名單是 RGB、q6、總開口；privileged 真值僅給 expert，
+不是因為被存檔就可當 policy input。相機為理想 pinhole D405，沒有 stereo／噪聲模型。
+raw schema 名稱仍含 pilot_v1，並非已提供 ACT／DP loader。
+
+固定孔位 worker 使用 barrier reset；--all_grid 才分批新建場景換孔位，避免在
+運行中移動靜態 collider。四種公差交錯、各 289 案，共 1,156 案。
+全網格固定 baseline、240 Hz servo、gzip、每點一回合、不額外 replay。
+完整 task failure 照樣歸檔，不反覆重跑到成功；只有未完成的基礎設施錯誤會重試。
+連續三次沒有新完成回合會停；來源／資產改動、低空間或 stop marker 也會停。
+磁碟保留 20 GB，啟動下一批另要求最壞情況 RGB-D 空間；不會刪舊資料騰空間。
+
+worker 的 manifest 用 episodes；campaign 各 dataset manifest 用 cases，
+內含 pending／success／task_failure。不要用同一段 loader 假設兩者格式相同。
+保留所有失敗、partial、log，但不要當成成功 demonstration。
+--replay 通過門檻為任務成功與最大 TCP 差 ≤3 mm，並非 bitwise deterministic，
+也不能把全軌跡最大 TCP 差直接當最終插入誤差。
+
+## 9. 已有資料、停止狀態與續收
+
+2026-11-12 最後核對：
+
+| 公差 mm | campaign 登記完成 | 已登記失敗 |
+| --- | ---: | ---: |
+| 1.00 | 28 | 0 |
+| 0.50 | 28 | 0 |
+| 0.25 | 24 | 0 |
+| 0.10 | 24 | 0 |
+
+路徑：data/full_grid_4clearance_20261112_01/。合計 104／1,156。
+重開機中斷於 c0p25_batch_006，位置 r01_c07～r01_c10；該批另有 2 份完整
+HDF5 與 2 份 partial，尚未核對入 canonical manifest，不把它們加進已完成數。
+使用者已要求先不收，目前沒有重新啟動。status 的 running／PID／ETA 為舊值。
+
+不要在新機直接 --resume 舊目錄：
+
+1. campaign command 含 Windows 絕對路徑，資產指紋含 mtime，且有舊 RUNNING.lock。
+2. 現有程式未實作跨平台 checkpoint 轉換，不可刪掉來源檢查來硬續。
+3. 先備份並審核 104 案及中斷批次的 complete／成功／時間／metadata。
+4. 對 complete 但尚未登記的案做對帳；partial 只保留，不補名為成功。
+5. 由 canonical case IDs 建立 missing-case 清單，在 Ubuntu 新 campaign 收缺項，
+   另記平台／driver／runtime provenance；目前「只跑此缺項清單」入口尚需實作。
+6. 同機同路徑 resume 也要先確認舊 supervisor／worker 全退出，核對／備份 stale lock。
+
+不要只根據檔案數、過期 running 標記或 manifest 的布林值宣稱整份資料已驗收。
+目前所有 split=unassigned，還不能宣稱完成訓練集或把 candidate-seen 當已訓練位置。
+
+## 10. 長時間執行與優先待辦
+
+Ubuntu 長任務建議放在新開的 tmux session，另存 log；SSH 斷線不應當作停止方式。
+不要讓同一 data_dir 有兩個 producer；不得在收集中修改程式／assets。
+用 campaign 根目錄的 STOP_REQUESTED 停止，查程序與 log 確認退出；
+重開機不會自動續收，本專案沒有 systemd／開機服務。
+遷移驗證完成前，不要順手啟動全網格或改寫 Windows 原資料。
+
+優先順序：Linux 相同版本 smoke → 四公差小批 → 第二張卡驗證 → 不重疊雙卡
+分片與 missing-case 遷移 → 固定 Train/Validation/Evaluation manifests → 正式補收
+與資料驗收 → loader／ACT／DP pilot。
+現有 3060 測試時間不能直接套用到 4090×2，應重新量測含相機與寫檔的成功吞吐。
+詳細舊測試見 docs/EXPERT_SPEED_VALIDATION.md、PRECISION_SUBSET_RESULT.md、
+REPEATED_ROLLOUT_VALIDATION.md；版本舊的結果不自動代表新機驗收通過。
