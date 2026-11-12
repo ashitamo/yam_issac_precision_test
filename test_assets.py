@@ -1,4 +1,4 @@
-"""Read-only asset audit, plus a local JSON report. Does not require Isaac startup."""
+"""Read-only asset audit and JSON report; Sim 4.5 supplies the USD libraries."""
 import json
 import ast
 import importlib.metadata
@@ -7,11 +7,11 @@ import sys
 import xml.etree.ElementTree as ET
 import numpy as np
 import trimesh
-from pxr import Usd, UsdUtils
 import env_config as cfg
 
 
 def main():
+    from pxr import Usd, UsdUtils
     versions = {}
     for package in ['numpy', 'scipy', 'torch', 'trimesh', 'isaacsim', 'isaaclab']:
         try:
@@ -78,4 +78,13 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    from isaaclab.app import AppLauncher
+    import traceback
+    launcher = AppLauncher(headless=True)
+    try:
+        main()
+    except BaseException:
+        traceback.print_exc()
+        raise
+    finally:
+        launcher.app.close(wait_for_replicator=False)

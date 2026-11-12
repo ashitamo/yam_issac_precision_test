@@ -17,6 +17,23 @@ def tensor(value):
     return value.torch if hasattr(value, "torch") else value
 
 
+def get_current_stage():
+    from isaacsim.core.utils.stage import get_current_stage as native_stage
+    return native_stage()
+
+
+def close_simulation(app):
+    """Stop PhysX and detach callbacks before unloading Kit (Lab 2.1)."""
+    import isaaclab.sim as sim_utils
+    sim = sim_utils.SimulationContext.instance()
+    try:
+        if sim is not None:
+            sim.stop()
+            sim.clear_instance()
+    finally:
+        app.close(wait_for_replicator=False)
+
+
 def wxyz_to_xyzw(q):
     """Isaac Lab 2.1 native quaternion -> public dataset convention."""
     return q[..., [1, 2, 3, 0]]
@@ -55,7 +72,8 @@ class _WxyzIKBoundary:
 def create_simulation(device):
     """Pinned Lab 2.1 / Sim 4.5 backend; no Isaac Sim 6 physics options."""
     from importlib.metadata import version
-    if not version('isaacsim').startswith('4.5.') or version('isaaclab') != '2.1.0':
+    # v2.1.0 is the repository release; its extension distribution is 0.36.21.
+    if not version('isaacsim').startswith('4.5.') or version('isaaclab') != '0.36.21':
         raise RuntimeError('compat/isaaclab-2.1 requires Isaac Sim 4.5.x and Isaac Lab 2.1.0; use main for Sim 6')
     import isaaclab.sim as sim_utils
     from pxr import PhysxSchema
@@ -64,7 +82,7 @@ def create_simulation(device):
         physx=sim_utils.PhysxCfg(
             min_position_iteration_count=cfg.SCENE_MIN_POSITION_ITERATIONS,
             min_velocity_iteration_count=cfg.SCENE_MIN_VELOCITY_ITERATIONS)))
-    physics = PhysxSchema.PhysxSceneAPI.Get(sim_utils.get_current_stage(), sim.cfg.physics_prim_path)
+    physics = PhysxSchema.PhysxSceneAPI.Get(get_current_stage(), sim.cfg.physics_prim_path)
     for method, enabled in (
         ('CreateEnableExternalForcesEveryIterationAttr', cfg.TGS_EXTERNAL_FORCES_EVERY_ITERATION),
         ('CreateSolveArticulationContactLastAttr', cfg.SOLVE_ARTICULATION_CONTACT_LAST)):
@@ -103,7 +121,7 @@ class ParallelYamScene:
         self.heterogeneous_holes = not np.allclose(self.workpiece_positions,
             self.workpiece_positions[:1], atol=1e-12, rtol=0)
         self.scene = InteractiveScene(InteractiveSceneCfg(
-            num_envs=num_envs, env_spacing=2.0, replicate_physics=not self.heterogeneous_holes))
+            num_envs=num_envs, env_spacing=2.0, replicate_physics=False))
         source = self.scene.env_prim_paths[0]
         robot_cfg = YamRobotConfig(
             prim_path=source + "/YAM",
@@ -130,7 +148,7 @@ class ParallelYamScene:
         next_vertex = np.roll(ring, -1, axis=0)
         self.hole_radius_m = float(np.min(abs(ring[:, 0] * next_vertex[:, 1]
             - ring[:, 1] * next_vertex[:, 0]) / np.linalg.norm(next_vertex - ring, axis=1)))
-        mesh = UsdGeom.Mesh.Define(sim_utils.get_current_stage(), source + "/Workpiece")
+        mesh = UsdGeom.Mesh.Define(get_current_stage(), source + "/Workpiece")
         mesh.CreatePointsAttr(mesh_data.vertices.astype(np.float32).tolist())
         mesh.CreateFaceVertexCountsAttr([3] * len(mesh_data.faces))
         mesh.CreateFaceVertexIndicesAttr(mesh_data.faces.flatten().tolist())
@@ -160,11 +178,15 @@ class ParallelYamScene:
         # PhysX replication copies the prototype's internal actor transforms.
         # Different hole locations require USD clones parsed independently.
         # Articulation/peg tensors are still batched in the same simulator.
-        self.scene.clone_environments(copy_from_source=self.heterogeneous_holes)
+        self.scene.clone_environments(copy_from_source=True)
+        # Sim 4.5 requires reset Xform stacks on nested rigid bodies. Independent
+        # clones must be baked after placement, before parsing/starting PhysX.
+        for path in self.scene.env_prim_paths:
+            YamRobot.prepare_legacy_rigid_hierarchy(path + '/YAM')
         # Author each static hole pose before PhysX starts. Never move static
         # colliders in a running episode; task scheduling uses fixed rows.
         for path, position in zip(self.scene.env_prim_paths, self.workpiece_positions):
-            sim_utils.get_current_stage().GetPrimAtPath(path + "/Workpiece").GetAttribute(
+            get_current_stage().GetPrimAtPath(path + "/Workpiece").GetAttribute(
                 "xformOp:translate").Set(Gf.Vec3d(*position))
         self.scene.filter_collisions()
         regex = self.scene.env_regex_ns

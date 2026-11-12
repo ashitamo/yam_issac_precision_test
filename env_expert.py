@@ -1,7 +1,7 @@
 """One episode's pick-and-insert state, optionally selecting a batched scene row."""
 
 import env_config as cfg
-from env_task import peg_geometry, release_ready, geometry_diagnostic_thresholds
+from env_task import peg_geometry, release_ready, geometry_diagnostic_thresholds, contact_gate_pass
 import numpy as np
 import xml.etree.ElementTree as ET
 import json
@@ -133,6 +133,24 @@ class GraspValidation:
             raw = getattr(self.robot.articulation.data, name)
             value = (raw.torch if hasattr(raw, "torch") else raw)[self.env_id]
         return value if ids is None else value[ids]
+
+    def _finger_settling_rate(self):
+        """Position-envelope rate [m/s], not instantaneous solver velocity.
+
+        This bounds observed movement during a 50 ms window. It does not
+        change the aperture, force, tracking or subsequent lift/slip gates.
+        Raw native velocities remain in recorded diagnostics for audit.
+        """
+        history = getattr(self, '_finger_position_history', [])
+        q = self._joint_values('joint_pos', self.robot.gripper_joint_indices).detach().cpu().numpy().copy()
+        history.append((self.time, q))
+        while len(history) > 2 and history[1][0] <= self.time - cfg.CLOSE_POSITION_WINDOW_S:
+            history.pop(0)
+        self._finger_position_history = history
+        span = history[-1][0] - history[0][0]
+        if span < cfg.CLOSE_POSITION_WINDOW_S - 1e-9:
+            return float('inf')
+        return float(np.ptp(np.asarray([sample[1] for sample in history]), axis=0).max() / span)
 
     def _peg_position(self):
         if getattr(self, "observation", None) is not None:
@@ -317,6 +335,7 @@ class GraspValidation:
             print("[GRIP] requested=", self.stages[self.stage_index][2],
                   "target=", self._joint_values("joint_pos_target", ids).tolist(),
                   "actual=", self._joint_values("joint_pos", ids).tolist(),
+                  "velocity=", self._joint_values("joint_vel", ids).tolist(),
                   "drive_force_estimate=", self._joint_values("applied_torque", ids).tolist(), flush=True)
             self.last_log_time = self.time
             if name in {"transfer", "align", "insert"}:
@@ -339,7 +358,7 @@ class GraspValidation:
         if name == "close":
             ids = self.robot.gripper_joint_indices
             gap = self._opening()
-            finger_speed = float(self._joint_values("joint_vel", ids).abs().max().item())
+            finger_speed = self._finger_settling_rate()
             drive_force = self._joint_values("applied_torque", ids)
             loaded = bool((drive_force > cfg.CLOSE_MIN_DRIVE_FORCE_N).all().item())
             settled = (
@@ -465,7 +484,11 @@ class GraspValidation:
 
     def finish(self, success, reason):
         self.finished = True
+        contact_ok = contact_gate_pass(self.max_insertion_radial_violation_m,
+                                       self.max_insertion_bottom_penetration_m)
         result = dict(observation_source=self.observation_source, env_id=self.env_id, env_origin_m=self.env_origin.tolist(), success=success, reason=reason, stages=self.stage_results,
+                      motion_success=success, contact_gate_pass=contact_ok,
+                      accepted_success=bool(success and (contact_ok or not cfg.RUN_INSERTION)),
                       status="completed",
                       grasp_success=self.grasp_success,
                       insertion_success=self.insertion_success,
@@ -502,6 +525,8 @@ class GraspValidation:
                       gripper_speed_limit_m_s=self.robot.config.gripper_velocity_limit_sim,
                       gripper_stiffness_n_m=self.robot.config.gripper_stiffness,
                       gripper_damping_n_s_m=self.robot.config.gripper_damping,
+                      close_settling_metric='finger_position_envelope_rate',
+                      close_position_window_s=cfg.CLOSE_POSITION_WINDOW_S,
                       arm_motor_effort_limit_nm=self.robot.config.arm_effort_limit_sim,
                       arm_velocity_limit_rad_s=self.robot.config.arm_velocity_limit_sim,
                       arm_peak_estimated_effort_nm=self.arm_peak_estimated_effort_nm.tolist(),
@@ -527,7 +552,8 @@ class GraspValidation:
         if cfg.RUN_INSERTION:
             (self.output_dir / "pick_insert_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         label = "TASK" if cfg.RUN_INSERTION else "GRASP"
-        print(f"[{label} {'PASS' if success else 'FAIL'}] {reason}; report={path}", flush=True)
+        outcome = 'PASS' if result['accepted_success'] else ('MOTION COMPLETE / CONTACT REJECTED' if success else 'FAIL')
+        print(f"[{label} {outcome}] {reason}; report={path}", flush=True)
 
 
 # --- Multi-environment expert scheduling ---

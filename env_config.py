@@ -95,6 +95,9 @@ REACHED_HOLD_S = 0.5
 CLOSE_STABLE_S = 0.15
 CLOSE_GAP_TOLERANCE_M = 0.0005
 CLOSE_MAX_FINGER_SPEED_M_S = 0.001
+# Sim 4.5 reports noisy solver velocities at stationary contacts. Assess
+# settling from the position envelope over this interval, not one solver tick.
+CLOSE_POSITION_WINDOW_S = 0.05
 CLOSE_MIN_DRIVE_FORCE_N = 0.05
 SAVE_VALIDATION_IMAGES = False
 LIFT_REACHED_HOLD_S = 0.15

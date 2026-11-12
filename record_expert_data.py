@@ -335,7 +335,8 @@ def main():
             try:
                 stack.close()
             finally:
-                launcher.app.close()
+                from env_yam import close_simulation
+                close_simulation(launcher.app)
 
 
 def campaign_plan(points, clearances=(1., .5, .25, .1), num_envs=4):

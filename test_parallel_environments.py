@@ -2,6 +2,8 @@
 import argparse
 import json
 import time
+import traceback
+import sys
 from pathlib import Path
 
 
@@ -32,6 +34,7 @@ def main():
         art = scene.robot.articulation
         assert tensor(art.data.joint_pos).shape[0] == args.num_envs
         before = tensor(art.data.joint_pos).clone()
+        base_initial = tensor(art.data.root_pos_w).clone() - scene.scene.env_origins
         # Perturb only row zero; reset must restore it, without touching others.
         moved = before[:1].clone()
         moved[:, 0] += 0.05
@@ -47,6 +50,8 @@ def main():
         elapsed = time.perf_counter() - start
         q = tensor(art.data.joint_pos)
         local_peg = tensor(scene.peg.data.root_pos_w) - scene.scene.env_origins
+        base_final = tensor(art.data.root_pos_w) - scene.scene.env_origins
+        base_error = float(torch.maximum(base_initial.abs().max(), base_final.abs().max()))
         assert torch.isfinite(q).all() and torch.isfinite(local_peg).all()
         # Identical scenes should evolve similarly in their own local frames.
         q_spread = float((q - q[:1]).abs().max())
@@ -60,13 +65,15 @@ def main():
         torch.testing.assert_close(tensor(scene.peg.data.root_pos_w)[1:], peg_other, rtol=0, atol=0)
         torch.testing.assert_close(tensor(scene.peg.data.root_vel_w)[1:], vel_other, rtol=0, atol=0)
         torch.testing.assert_close(tensor(scene.peg.data.root_vel_w)[0], torch.zeros(6, device=sim.device))
-        passed = q_spread < 0.001 and peg_spread < 0.001
+        passed = q_spread < 0.001 and peg_spread < 0.001 and base_error < 1e-5
         report = dict(passed=passed, num_envs=args.num_envs,
             single_simulator=True, batched_articulation=True, cameras_enabled=False,
             partial_reset_preserves_other_joint_states=True,
             partial_reset_preserves_other_peg_states=True,
             episode_counts=scene.episode_count.cpu().tolist(),
             max_joint_difference_rad=q_spread, max_peg_local_difference_m=peg_spread,
+            max_base_origin_error_m=base_error,
+            base_positions_relative_to_env_m=base_final.cpu().tolist(),
             physics_steps=args.steps, wall_seconds=elapsed,
             environment_steps_per_second=args.steps * args.num_envs / elapsed,
             scope="reset and identical-scene smoke test only; not insertion validation")
@@ -75,8 +82,14 @@ def main():
         print(json.dumps(report, indent=2), flush=True)
         if not passed:
             raise RuntimeError("Parallel scene equivalence check failed")
+    except Exception:
+        # Sim 4.5 close() may terminate Python before the interpreter prints it.
+        traceback.print_exc()
+        sys.stderr.flush()
+        raise
     finally:
-        launcher.app.close()
+        from env_yam import close_simulation
+        close_simulation(launcher.app)
 
 
 if __name__ == "__main__":

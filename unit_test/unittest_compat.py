@@ -13,6 +13,32 @@ import env_config as cfg
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_shutdown_stops_physics_before_closing_kit(self):
+        from env_yam import close_simulation
+        calls = []
+        sim = SimpleNamespace(stop=lambda: calls.append('stop'), clear_instance=lambda: calls.append('clear'))
+        sim_module = ModuleType('isaaclab.sim')
+        sim_module.SimulationContext = SimpleNamespace(instance=lambda: sim)
+        package = ModuleType('isaaclab')
+        package.sim = sim_module
+        app = SimpleNamespace(close=lambda **kw: calls.append(('close', kw)))
+        with patch.dict(sys.modules, {'isaaclab': package, 'isaaclab.sim': sim_module}):
+            close_simulation(app)
+        self.assertEqual(calls, ['stop', 'clear', ('close', {'wait_for_replicator': False})])
+
+    def test_contact_settling_uses_displacement_envelope_not_solver_noise(self):
+        from env_expert import GraspValidation
+        for rate, should_settle in ((0., True), (.01, False)):
+            expert = object.__new__(GraspValidation)
+            expert.robot = SimpleNamespace(gripper_joint_indices=[6, 7])
+            expert.time = 0.
+            expert._joint_values = lambda *args: torch.tensor([expert.time * rate, -expert.time * rate])
+            self.assertEqual(expert._finger_settling_rate(), float('inf'))
+            for tick in range(1, 25):
+                expert.time = tick / 240
+                measured = expert._finger_settling_rate()
+            self.assertEqual(measured <= cfg.CLOSE_MAX_FINGER_SPEED_M_S, should_settle)
+
     def test_factory_uses_old_physx_config_and_rejects_unsupported_options(self):
         calls = []
         sim_module = ModuleType('isaaclab.sim')
@@ -24,8 +50,8 @@ class CompatibilityTests(unittest.TestCase):
         package.sim = sim_module
         pxr = ModuleType('pxr')
         pxr.PhysxSchema = SimpleNamespace(PhysxSceneAPI=SimpleNamespace(Get=lambda *args: SimpleNamespace()))
-        with patch.dict(sys.modules, {'isaaclab': package, 'isaaclab.sim': sim_module, 'pxr': pxr}), patch(
-                'importlib.metadata.version', side_effect=lambda key: '4.5.0' if key == 'isaacsim' else '2.1.0'):
+        with patch('env_yam.get_current_stage', return_value=None), patch.dict(sys.modules, {'isaaclab': package, 'isaaclab.sim': sim_module, 'pxr': pxr}), patch(
+                'importlib.metadata.version', side_effect=lambda key: '4.5.0' if key == 'isaacsim' else '0.36.21'):
             sim = create_simulation('cuda:0')
             self.assertEqual(len(calls), 1)
             self.assertEqual(sim.cfg.device, 'cuda:0')

@@ -2,7 +2,8 @@
 
 > 此分支：`compat/isaaclab-2.1`，目標為 **Isaac Lab 2.1.0 + Isaac Sim 4.5.0 + Python 3.10**。
 > 原 Isaac Sim 6 版本保留在 `main`（分支起點 `d234683`）。
-> 已通過 CPU 契約測試；Ubuntu 550.144.03 的原生模擬／接觸／相機尚待驗證。
+> 已在 Windows／RTX 3060 原生啟動，驗證 reset、Jacobian、Cartesian IK、RGB-D 收錄與 action 回播。
+> **完整成功驗收尚未通過**：中心點原始回合接觸幾何超界約 0.23 mm，大於 0.05 mm；Ubuntu 550 驅動仍未驗證。
 > 下方既有收集統計與效能數字屬於 main，不代表本分支已完成原生驗證。
 
 YAM 夾取白色 peg，搬運至黑色工件並插入、開爪，最後確認 peg 落底。
@@ -22,6 +23,7 @@ YAM 夾取白色 peg，搬運至黑色工件並插入、開爪，最後確認 pe
 conda create -n env_yam21 python=3.10 -y
 conda activate env_yam21
 python -m pip install --upgrade pip
+python -m pip install 'setuptools<81' toml
 python -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 python -m pip install 'isaacsim[all,extscache]==4.5.0' --extra-index-url https://pypi.nvidia.com
 git clone --branch v2.1.0 --depth 1 https://github.com/isaac-sim/IsaacLab.git ~/IsaacLab-2.1
@@ -29,10 +31,13 @@ cd ~/IsaacLab-2.1
 ./isaaclab.sh --install none
 cd /path/to/yam_issac_precision_test
 git switch compat/isaaclab-2.1
-python -m pip install 'numpy==1.26.4' 'scipy==1.15.3' 'h5py==3.12.1' 'trimesh==4.6.8' 'Pillow==11.1.0'
+python -m pip install 'numpy==1.26.4' 'scipy==1.15.3' 'h5py==3.12.1' 'trimesh==4.6.8' 'Pillow==11.0.0'
+python -m pip install 'https://github.com/NVIDIA/warp/releases/download/v1.8.1/warp_lang-1.8.1%2Bcu11-py3-none-manylinux2014_x86_64.whl'
 python -m pip check
 ```
 
+v2.1.0 的 `isaaclab` distribution 版本其實是 `0.36.21`，不是 `2.1.0`。
+Warp 固定官方 1.8.1/cu11 wheel，避免未鎖版本自動安裝 CUDA 13 wheel 而要求更新 driver。
 這是目標安裝配方，不是已在 Ubuntu 實測的完整 lockfile；若 pip check 衝突，先保留錯誤，不要強制忽略。
 驅動維持 550 不在此修改；仍須先確認 Isaac Sim 4.5 能啟動，不能以跳過 driver check 代替驗證。
 複製專案程式、assets、unit_test 與文件；不要複製 Windows conda 環境。
@@ -68,20 +73,26 @@ python -u record_expert_data.py --headless --device cuda:0 \
 測第二張卡。全網格 supervisor 目前固定啟動 GPU 0，尚無雙 GPU 分片排程。
 不要讓兩個程序寫同一個 data_dir。完整雙卡試跑與背景執行說明見 HANDOVER。
 
-### Windows（原開發機，main 的歷史環境）
+### Windows（本機測試環境）
 
-在 PowerShell 執行：
+已另外建立 `env_yam21`，沒有修改原本的 `env_isaaclab6_win`。
+目前使用 Python 3.10.20、Sim 4.5.0.0、Lab v2.1.0（distribution 0.36.21）、
+Torch 2.5.1/cu121。環境不是 repo 內容；另一台電腦仍須重新安裝。
 
 ```powershell
-conda activate env_isaaclab6_win
+conda activate env_yam21
 Set-Location C:\Users\hsun91\Desktop\yam_issac_precision_test
+python -B -m unittest discover -s unit_test -p 'unittest_*.py' -q
+python -u .\run_environment.py --kit_args="--/app/vulkan=false"
 ```
 
-上面的 env_isaaclab6_win 只用於 main，不可執行此相容分支。此分支需另建 Python 3.10／Sim 4.5 環境；Windows 原生相容版尚未測試。
-以下指令均從專案根目錄執行，使用目前分支對應的 Python。
-原機查得 isaacsim distribution 為 6.0.1.0、isaaclab 為 6.1.14，另需 h5py、SciPy、
-trimesh 等依賴。資產在本專案內，但其他電腦仍須另外安裝相容的 Isaac Lab／
-Isaac Sim 與 Python 環境；只複製資料夾不等於完成 runtime 安裝。
+**本機 Windows 的有相機／GUI 測試需要 D3D12**：在下方 Windows 指令後加
+`--kit_args="--/app/vulkan=false"`。不將這個 Windows 專用參數帶到 Ubuntu。
+原 Vulkan 渲染啟動曾發生 native crash；不是以關閉 driver check 解決。
+
+Windows 本次測試還有「報告寫完後 Kit shutdown 不退出」的問題。
+已完成報告不等於程序正常結束；這個問題尚待解決，暫不宣稱可無人值守全網格收集。
+詳細測試結果與檔案位置見 HANDOVER。
 
 ## 2. 啟動環境
 

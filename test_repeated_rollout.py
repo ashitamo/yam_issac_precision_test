@@ -163,7 +163,8 @@ def main():
         save()
         raise
     finally:
-        launcher.app.close()
+        from env_yam import close_simulation
+        close_simulation(launcher.app)
 
 
 if __name__ == '__main__':

@@ -21,9 +21,10 @@ from scipy.spatial.transform import Rotation
 from scipy.spatial import ConvexHull
 
 import isaaclab.sim as sim_utils
+from isaacsim.core.utils.stage import get_current_stage
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import Articulation, ArticulationCfg
-from pxr import Usd, UsdGeom, UsdPhysics, UsdShade
+from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdShade, PhysxSchema
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -167,7 +168,42 @@ class YamRobot:
         self.config = config or YamRobotConfig()
         if spawn:
             self._spawn_usd()
+            self.prepare_legacy_rigid_hierarchy(self.config.prim_path)
         self.articulation = Articulation(self._make_articulation_cfg())
+
+    @staticmethod
+    def prepare_legacy_rigid_hierarchy(prim_path):
+        """Bake world poses before resetting nested rigid Xforms for Sim 4.5.
+
+        Called after independent environment cloning, before PhysX starts.
+        Joint/body paths and rigid local coordinate frames remain unchanged.
+        Only the current stage is edited; source USD files are never saved.
+        """
+        stage = get_current_stage()
+        cache = UsdGeom.XformCache()
+        base = stage.GetPrimAtPath(prim_path + '/Geometry/world/base')
+        authored_self_collision = base.GetAttribute('newton:selfCollisionEnabled')
+        enabled = bool(authored_self_collision.Get()) if authored_self_collision.IsValid() else False
+        PhysxSchema.PhysxArticulationAPI.Apply(base).CreateEnabledSelfCollisionsAttr(enabled)
+        bodies = [p for p in Usd.PrimRange(stage.GetPrimAtPath(prim_path))
+                  if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+        world = [(p, cache.GetLocalToWorldTransform(p)) for p in bodies]
+        for prim, matrix in world:
+            xform = UsdGeom.Xformable(prim)
+            xform.ClearXformOpOrder()
+            xform.AddTransformOp(opSuffix='lab21WorldPose').Set(matrix)
+            xform.SetResetXformStack(True)
+        anchor = UsdPhysics.FixedJoint.Get(stage, prim_path + '/Physics/world_to_base')
+        targets = anchor.GetBody1Rel().GetTargets()
+        if len(targets) != 1:
+            raise ValueError('Expected a single world-to-base anchor target')
+        base_world = dict((str(p.GetPath()), m) for p, m in world)[str(targets[0])]
+        anchor.GetBody0Rel().ClearTargets(True)
+        # Sim 4.5 resolves an unbound joint side in its parent Xform frame;
+        # using world coordinates here would apply the env translation twice.
+        anchor_frame = base_world * cache.GetLocalToWorldTransform(anchor.GetPrim().GetParent()).GetInverse()
+        anchor.GetLocalPos0Attr().Set(Gf.Vec3f(anchor_frame.Transform(Gf.Vec3d(anchor.GetLocalPos1Attr().Get()))))
+        anchor.GetLocalRot0Attr().Set(Gf.Quatf(anchor_frame.ExtractRotationQuat() * Gf.Quatd(anchor.GetLocalRot1Attr().Get())))
 
     @property
     def articulation_root_path(self) -> str:
@@ -193,7 +229,7 @@ class YamRobot:
 
     def _configure_visual_materials(self) -> None:
         """Apply an approximate standard YAM black/white finish to CAD meshes."""
-        stage = sim_utils.get_current_stage()
+        stage = get_current_stage()
         materials = {}
         for name, color in {
             "Dark": (0.025, 0.028, 0.032),
@@ -223,7 +259,7 @@ class YamRobot:
 
     def _configure_finger_colliders(self) -> None:
         """Apply decomposed convex collision and planar contact faces."""
-        stage = sim_utils.get_current_stage()
+        stage = get_current_stage()
         gripper_path = (
             f"{self.articulation_root_path}/link1/link2/link3/link4/link5/gripper"
         )
@@ -270,17 +306,15 @@ class YamRobot:
             mesh.GetPointsAttr().Set(points.astype(np.float32).tolist())
             mesh.GetFaceVertexCountsAttr().Set([3] * len(faces))
             mesh.GetFaceVertexIndicesAttr().Set(faces.flatten().tolist())
-            sim_utils.define_mesh_collision_properties(
-                collision_mesh_path,
-                sim_utils.PhysxConvexDecompositionPropertiesCfg(
-                    hull_vertex_limit=self.config.finger_collision_hull_vertex_limit,
-                    max_convex_hulls=self.config.finger_collision_max_hulls,
-                    voxel_resolution=self.config.finger_collision_voxel_resolution,
-                    error_percentage=self.config.finger_collision_error_percentage,
-                    shrink_wrap=True,
-                ),
-                stage=stage,
-            )
+            # Lab 2.1 has no mesh-collision config helper. Author the same
+            # decomposition parameters through Sim 4.5's native USD schema.
+            UsdPhysics.MeshCollisionAPI.Apply(collision_mesh).CreateApproximationAttr('convexDecomposition')
+            decomposition = PhysxSchema.PhysxConvexDecompositionCollisionAPI.Apply(collision_mesh)
+            decomposition.CreateHullVertexLimitAttr(self.config.finger_collision_hull_vertex_limit)
+            decomposition.CreateMaxConvexHullsAttr(self.config.finger_collision_max_hulls)
+            decomposition.CreateVoxelResolutionAttr(self.config.finger_collision_voxel_resolution)
+            decomposition.CreateErrorPercentageAttr(self.config.finger_collision_error_percentage)
+            decomposition.CreateShrinkWrapAttr(True)
             approximation = UsdPhysics.MeshCollisionAPI(
                 collision_mesh
             ).GetApproximationAttr().Get()
@@ -430,7 +464,7 @@ class YamRobot:
                 raise ValueError('Cannot resolve every articulation world anchor')
             for base_path in base_paths:
                 anchor_path = str(base_path).removesuffix('/Geometry/world/base') + '/Physics/world_to_base'
-                anchor = UsdPhysics.FixedJoint.Get(sim_utils.get_current_stage(), anchor_path)
+                anchor = UsdPhysics.FixedJoint.Get(get_current_stage(), anchor_path)
                 if (not anchor or anchor.GetJointEnabledAttr().Get() is False
                         or str(base_path) not in [str(p) for p in anchor.GetBody1Rel().GetTargets()]):
                     raise ValueError('Cartesian controller requires world-anchored YAM assets')

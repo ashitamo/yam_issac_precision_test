@@ -7,6 +7,7 @@ import numpy as np
 import trimesh
 from scipy.spatial.transform import Rotation
 import env_config as cfg
+from env_yam import get_current_stage
 import json
 from pathlib import Path
 import h5py
@@ -28,7 +29,7 @@ class WristCamera:
         for articulation_path in paths:
             gripper = articulation_path + '/link1/link2/link3/link4/link5/gripper'
             path = gripper + '/D405'
-            stage = sim_utils.get_current_stage()
+            stage = get_current_stage()
             mount = UsdGeom.Xform.Define(stage, path)
             mount.AddTranslateOp().Set(Gf.Vec3d(*cfg.CAMERA_POSITION_M))
             x, y, z, w = Rotation.from_quat(cfg.CAMERA_QUAT_XYZW).as_quat()
@@ -83,7 +84,7 @@ class WristCamera:
             import isaaclab.sim as sim_utils
             actual = list(self.camera._view.prim_paths)
             rendered = [str(prim.GetPath()) for prim in sim_utils.find_matching_prims(
-                self.camera.cfg.prim_path, sim_utils.get_current_stage())]
+                self.camera.cfg.prim_path, get_current_stage())]
             if actual != rendered:
                 raise RuntimeError('Renderer and pose-view camera order differ; refusing mislabelled images')
             self.output_indices = self.match_camera_order(self.camera_paths, actual)

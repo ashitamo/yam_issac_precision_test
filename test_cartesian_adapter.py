@@ -10,9 +10,13 @@ def main():
     from isaaclab.app import AppLauncher
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expert', action='store_true')
+    parser.add_argument('--diagnostic_no_robot_contacts', action='store_true',
+                        help='Isolate control from collisions; never a task-success certification.')
     parser.add_argument('--output_dir', type=Path, default=Path(__file__).parent / 'outputs' / 'cartesian_adapter')
     AppLauncher.add_app_launcher_args(parser)
     args = parser.parse_args()
+    if args.expert and args.diagnostic_no_robot_contacts:
+        parser.error('No-contact diagnostics are limited to the short control probe, not expert tasks')
     args.output_dir = args.output_dir.resolve()
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         parser.error('Use an empty output directory')
@@ -39,6 +43,14 @@ def main():
         sim = create_simulation(args.device)
         grids = ['r08_c08', 'r16_c16'] if args.expert else ['r08_c08']
         scene = ParallelYamScene(sim, len(grids), .5, [get_grid_point(grid)['hole_position_m'] for grid in grids])
+        report['diagnostic_no_robot_contacts'] = args.diagnostic_no_robot_contacts
+        if args.diagnostic_no_robot_contacts:
+            from pxr import Usd, UsdPhysics
+            from env_yam import get_current_stage
+            for root in scene.scene.env_prim_paths:
+                for prim in Usd.PrimRange(get_current_stage().GetPrimAtPath(root + '/YAM')):
+                    if prim.HasAPI(UsdPhysics.CollisionAPI):
+                        UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Set(False)
         sim.reset()
         checks = scene.validate_workpiece_colliders()
         if not all(check['passed'] for check in checks):
@@ -125,6 +137,10 @@ def main():
             rotation_error = float(np.degrees((Rotation.from_quat(actual[0, 3:]).inv() * Rotation.from_quat(target[0, 3:])).magnitude()))
             report.update(passed=position_error < .001 and rotation_error < .5,
                 position_error_m=position_error, orientation_error_deg=rotation_error, policy_steps=20,
+                joint_position=obs['joint_position'].cpu().tolist(),
+                last_joint_target=wrapped.last_joint_target.cpu().tolist(),
+                actual_pose=actual.tolist(), target_pose=target.tolist(),
+                gravity_forces=scene.robot.articulation.root_physx_view.get_gravity_compensation_forces().cpu().tolist(),
                 fixed_target_not_reintegrated=True, raw_reference_source='native TCP Jacobian tangent')
         report.update(state='completed', wall_seconds=time.perf_counter() - start, physics_steps=low.global_steps)
         save()
@@ -137,7 +153,8 @@ def main():
         save()
         raise
     finally:
-        launcher.app.close()
+        from env_yam import close_simulation
+        close_simulation(launcher.app)
 
 
 if __name__ == '__main__':

@@ -12,7 +12,7 @@
 - 固定版本：Python 3.10、Isaac Sim 4.5.0、Isaac Lab **v2.1.0**，官方 tag commit
   `21f7136325136ca3f6ca4e0a8125edffe5c24f7e`；Torch 2.5.1/cu121。
 - 安裝指令見 README。不要在現有 Python 3.12 環境覆蓋安裝，不用容器繞過 host driver 限制。
-- 本機僅有 Sim 6 runtime；60 個 CPU 測試通過，不等於舊版原生模擬通過。
+- 本機已另建 Windows `env_yam21`；62 個 CPU 測試通過，另完成下述原生測試。Ubuntu 仍未實測。
 - 後文原有 104 回合資料、效能數字、0.10 mm 接觸驗證均是 **main 歷史證據**，未移植認證。
 - 不自動恢復收集、不修改既有 data/checkpoint。相容版必須用全新 data_dir。
 
@@ -26,7 +26,14 @@
    身體 pose 來自原生 FK，不新增另一套 runtime URDF FK。
 4. Jacobian 使用 `root_physx_view.get_jacobians()`，檢查 fixed/floating 欄位，
    從 COM 平移到 TCP，再轉 BASE；以原生 FK 有限差分測試作為上機門檻。
-5. 重力補償使用 `get_gravity_compensation_forces()` 並檢查 0／6 個 root 欄位。
+5. `prepare_legacy_rigid_hierarchy` 在所有環境複製完成後，將巢狀 rigid bodies 的世界位姿
+   bake 成 reset Xform stack，保留 joint/body 路徑、幾何局部座標與來源 USD。
+   世界固定關節的空 body0 在 4.5 會套用 parent Xform，必須避免 env origin 套兩次；
+   reset 測試已檢查 base 與 env origin 的誤差。相容版目前關閉 PhysX replication，
+   保留同程序多環境但使用獨立 USD clones，尚未認證大量環境效能。
+   同時把來源 `newton:selfCollisionEnabled=False` 明確映射到 PhysX articulation 屬性，
+   否則 4.5 預設的 self-collision 會阻擋手指並破壞追蹤。
+6. 重力補償使用 `get_gravity_compensation_forces()` 並檢查 0／6 個 root 欄位。
    保留 10 Nm 總力矩預算、夾爪 actuator、質量與摩擦設定；未宣稱動態等效。
 6. 這次實驗未用到的 Sim 6 cuMotion／experimental RMPflow 類別從本分支移除，
    不提供同名假相容函式；CartesianYamEnv 繼續使用 Lab 原生 DLS IK。
@@ -36,6 +43,57 @@
 8. profiler 改量 `engine.step_inclusive`，不再聲稱可分開量 simulate/fetch_results。
    相機保持每環境 RGB-D、30 Hz 記錄契約；需在 4.5 實測畫面與 row mapping。
 9. GUI 不加 `--headless` 即可；2.1 不使用 `--viz kit`。
+
+### 本機實測結果（2026-11-12，Windows 11／RTX 3060／driver 610.88）
+
+原 Sim 6 conda 未修改；獨立安裝位於 `C:/Users/hsun91/.conda/envs/env_yam21`。
+Lab source 為 `C:/Users/hsun91/Desktop/IsaacLab-2.1` 的 v2.1.0 tag。
+安裝時修正 release tag 與 distribution version 不同的檢查，Pillow 改為 Lab 要求的 11.0.0。
+
+| 測試 | 結果／證據 |
+| --- | --- |
+| Python 3.10、pip check、CPU 契約 | 62 tests 通過、相依無衝突 |
+| 兩環境 reset／物理步進 | `outputs/lab21_windows_reset_004/result.json` 通過；base origin 最大誤差約 1.7 µm，其他 row 未被部分 reset 改動 |
+| 原生 TCP Jacobian＋DLS 控制 | `outputs/lab21_windows_cartesian_002/cartesian_result.json` 通過；FK 有限差分差異位置約 0.000060 m/rad，角速度約 0.000211；動態 TCP 位置誤差約 0.0027 mm |
+| Warp cu11 重驗 | 改裝 1.8.1+cu11 後，`outputs/lab21_windows_cartesian_cu11_001/cartesian_result.json` 的 Jacobian 與 DLS 測試仍通過，TCP 誤差約 0.0027 mm |
+| 環境入口／相機 | Warp cu11 下執行 `run_environment.py` headless 120 步完成；`outputs/lab21_windows_viewer_001/rgb.png`，RGB 360×640×3、depth 360×640；未以 GUI 開窗測試 |
+| 無碰撞診斷 | `outputs/lab21_windows_no_contacts_001` 僅供隔離原因，不可當正式任務成功 |
+| 原始速度門檻測試 | `outputs/lab21_windows_full_task_001`／`data/lab21_windows_smoke_002`，close timeout；原生 finger 速度中位數約 1.60 mm/s，但位置差分僅約 0.015 mm/s |
+| 修改穩定判斷後的收錄 | `data/lab21_windows_smoke_003`，完成夾取、搬運、插入與開爪落底；HDF5 結構與影像／時間戳稽核通過 |
+| 上述回合正式驗收 | **失敗**：`terminal_reason=contact_violation`，最大徑向幾何超界約 0.231 mm > 0.050 mm；沒有調寬門檻或重標成功 |
+| Action 回播 | 同一資料夾 summary：成功落底、`replay_passed=true`，TCP 與原紀錄最大差異約 0.251 mm；不能因此改寫原始回合的失敗標籤 |
+| 批次／GPU／Linux | 尚未驗證 289 點、雙卡、Ubuntu 550 或多相機原生 row mapping |
+
+`smoke_003/episodes/episode_000000.hdf5` 為 **389 actions／390 observations**，
+RGB 為 360×640、含 depth 與 diagnostics；這是診斷用失敗回合，不是已驗收訓練資料。
+同層 `episode_000000/rgb_initial.png`、`rgb_middle.png`、`rgb_terminal.png` 可預覽。
+`smoke_001` 在 Vulkan 啟動崩潰，沒有 episode；`smoke_002` 保留完成的失敗回合，
+已用 STOP_REQUESTED 中止無意義的失敗回播。不要把這些資料混入 main 的 campaign。
+這些產物按 .gitignore 留在本機，沒有隨 branch 上傳。
+
+關爪穩定判斷現在使用 **50 ms 位置 envelope 的位移／時間**，再要求穩定滿原定時間。
+仍用 1 mm/s 門檻，但這是 settling rate，不等於單一 tick 的瞬時 solver 速度；
+保留 aperture、載入力、姿態、lift／slip 及 0.05 mm 接觸門檻。raw velocity 仍完整記錄。
+這是 expert 相容性行為變更，不應宣稱物理模型與 main 完全等效。
+
+Windows 執行有相機的指令需加 `--kit_args="--/app/vulkan=false"`；
+D3D12 可取得正常影像，原 Vulkan 路徑在 renderer 初始化 native crash。
+首次 shader 編譯曾約兩分鐘；不是卡在 expert 等待。
+還有 **Kit shutdown 不退出** 的未解問題：報告／HDF5 關閉完成後，測試程序曾停在 native 關閉流程，
+本次確認各程序屬於測試後才手動停止。已嘗試 stop physics／clear callbacks，但不能宣稱已解決。
+因此尚不可承諾 supervisor 可無人值守跑完整 campaign。
+
+### Warp 與 Ubuntu 550 驅動注意事項
+
+舊 Lab 的 warp-lang 沒有上限；2026 的預設安裝拉到 1.19.0／CUDA 13.4，
+這不適合直接帶到 550。完整 RGB-D smoke_003 是在該 Windows 套件版本下執行；
+之後本機已改為官方 **Warp 1.8.1+cu11**，確認初始化與 CUDA array 配置成功、pip check 通過。
+Ubuntu x86_64 對應 wheel 已固定在 README；不能直接複製 Windows wheel。
+不要修改 Isaac Sim 隨附的 extension 二進位檔，也不要關閉 driver compatibility check。
+
+官方依據：[Warp 1.19 README 的 driver 要求](https://github.com/NVIDIA/warp/blob/v1.19.0/README.md)、
+[Warp 1.8.1 release／CUDA 11 wheel](https://github.com/NVIDIA/warp/releases/tag/v1.8.1)。
+Ubuntu 550 上的實際 Warp／Kit／PhysX 啟動仍是待驗 gate。
 
 ### Ubuntu 上必須依序通過的 gate
 
