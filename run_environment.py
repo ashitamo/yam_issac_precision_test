@@ -1,10 +1,17 @@
 """YAM precision experiment scene. Run with the Isaac Lab Python environment."""
 
 import argparse
+import sys
 import traceback
 from pathlib import Path
 
 import env_config as cfg
+
+# Sim 4.5's GUI wheeled-robot extension imports OSQP/qdldl during Kit startup.
+# On this Windows runtime that native import crashes after Kit has loaded DLLs.
+# Load it first; do not disable the extension or replace simulator binaries.
+if sys.platform == 'win32':
+    import osqp as _osqp_bootstrap
 
 from isaaclab.app import AppLauncher
 

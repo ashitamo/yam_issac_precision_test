@@ -31,7 +31,7 @@ cd ~/IsaacLab-2.1
 ./isaaclab.sh --install none
 cd /path/to/yam_issac_precision_test
 git switch compat/isaaclab-2.1
-python -m pip install 'numpy==1.26.4' 'scipy==1.15.3' 'h5py==3.12.1' 'trimesh==4.6.8' 'Pillow==11.0.0'
+python -m pip install 'numpy==1.26.4' 'scipy==1.15.3' 'h5py==3.12.1' 'trimesh==4.6.8' 'Pillow==11.0.0' requests
 python -m pip install 'https://github.com/NVIDIA/warp/releases/download/v1.8.1/warp_lang-1.8.1%2Bcu11-py3-none-manylinux2014_x86_64.whl'
 python -m pip check
 ```
@@ -89,6 +89,8 @@ python -u .\run_environment.py --kit_args="--/app/vulkan=false"
 **本機 Windows 的有相機／GUI 測試需要 D3D12**：在下方 Windows 指令後加
 `--kit_args="--/app/vulkan=false"`。不將這個 Windows 專用參數帶到 Ubuntu。
 原 Vulkan 渲染啟動曾發生 native crash；不是以關閉 driver check 解決。
+`run_environment.py` 已處理 Windows GUI 的 OSQP／qdldl 載入順序崩潰，
+並補齊資產瀏覽器需要的 requests；已用 GUI 實跑 120 步及相機快照驗證。
 
 Windows 本次測試還有「報告寫完後 Kit shutdown 不退出」的問題。
 已完成報告不等於程序正常結束；這個問題尚待解決，暫不宣稱可無人值守全網格收集。

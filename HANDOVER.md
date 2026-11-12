@@ -56,7 +56,7 @@ Lab source 為 `C:/Users/hsun91/Desktop/IsaacLab-2.1` 的 v2.1.0 tag。
 | 兩環境 reset／物理步進 | `outputs/lab21_windows_reset_004/result.json` 通過；base origin 最大誤差約 1.7 µm，其他 row 未被部分 reset 改動 |
 | 原生 TCP Jacobian＋DLS 控制 | `outputs/lab21_windows_cartesian_002/cartesian_result.json` 通過；FK 有限差分差異位置約 0.000060 m/rad，角速度約 0.000211；動態 TCP 位置誤差約 0.0027 mm |
 | Warp cu11 重驗 | 改裝 1.8.1+cu11 後，`outputs/lab21_windows_cartesian_cu11_001/cartesian_result.json` 的 Jacobian 與 DLS 測試仍通過，TCP 誤差約 0.0027 mm |
-| 環境入口／相機 | Warp cu11 下執行 `run_environment.py` headless 120 步完成；`outputs/lab21_windows_viewer_001/rgb.png`，RGB 360×640×3、depth 360×640；未以 GUI 開窗測試 |
+| 環境入口／相機 | Warp cu11 下 headless 120 步完成；另修正 OSQP 載入順序後，GUI 也完成 120 步，`outputs/lab21_gui_fixed_001/rgb.png`，RGB 360×640×3、depth 360×640 |
 | 無碰撞診斷 | `outputs/lab21_windows_no_contacts_001` 僅供隔離原因，不可當正式任務成功 |
 | 原始速度門檻測試 | `outputs/lab21_windows_full_task_001`／`data/lab21_windows_smoke_002`，close timeout；原生 finger 速度中位數約 1.60 mm/s，但位置差分僅約 0.015 mm/s |
 | 修改穩定判斷後的收錄 | `data/lab21_windows_smoke_003`，完成夾取、搬運、插入與開爪落底；HDF5 結構與影像／時間戳稽核通過 |
@@ -79,6 +79,11 @@ RGB 為 360×640、含 depth 與 diagnostics；這是診斷用失敗回合，不
 Windows 執行有相機的指令需加 `--kit_args="--/app/vulkan=false"`；
 D3D12 可取得正常影像，原 Vulkan 路徑在 renderer 初始化 native crash。
 首次 shader 編譯曾約兩分鐘；不是卡在 expert 等待。
+GUI 另曾在 `wheeled_robots -> osqp -> qdldl` 原生匯入時 access violation。
+OSQP 單獨匯入正常；在 Kit 前預載後，診斷與正常入口兩次 GUI 啟動均通過。
+`run_environment.py` 僅在 Windows 預載 OSQP，沒有改動第三方二進位或停用擴充。
+同時在 env_yam21 安裝 requests 2.34.2，解決 asset.browser 缺少依賴。
+GUI 的 HDF5 版本警告仍待隔離，不應把此次 viewer 驗證當成 GUI 資料錄製驗證。
 還有 **Kit shutdown 不退出** 的未解問題：報告／HDF5 關閉完成後，測試程序曾停在 native 關閉流程，
 本次確認各程序屬於測試後才手動停止。已嘗試 stop physics／clear callbacks，但不能宣稱已解決。
 因此尚不可承諾 supervisor 可無人值守跑完整 campaign。
